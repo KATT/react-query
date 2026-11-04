@@ -1,0 +1,11 @@
+{
+  "name": "repro-hydrated-retry",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node repro.mjs"
+  },
+  "dependencies": {
+    "@tanstack/query-core": "5.106.0"
+  }
+}
