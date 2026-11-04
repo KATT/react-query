@@ -29,12 +29,12 @@ serverClient
 const dehydratedState = dehydrate(serverClient)
 
 // Browser: the client turns retries off by default, and this reader turns them back on
-const queryClient = new QueryClient({
+const browserClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
 })
-hydrate(queryClient, dehydratedState)
+hydrate(browserClient, dehydratedState)
 
-const observer = new QueryObserver(queryClient, {
+const observer = new QueryObserver(browserClient, {
   queryKey,
   queryFn: () => sleep(10).then(() => 'data from the browser'),
   retry: 1,
@@ -43,7 +43,7 @@ const observer = new QueryObserver(queryClient, {
 observer.subscribe(() => {})
 
 await sleep(500)
-const { status, data, error } = queryClient.getQueryState(queryKey)
+const { status, data, error } = browserClient.getQueryState(queryKey)
 console.log({ status, data, error: error?.message })
 // Expected: { status: 'success', data: 'data from the browser', error: undefined }
 process.exit(0)
