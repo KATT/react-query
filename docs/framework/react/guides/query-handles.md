@@ -75,9 +75,12 @@ export async function loader({ params }) {
 
 ### Using cached data, even if stale
 
-Both functions take options for one call as their last argument. Only `staleTime` is allowed, and it applies to that call only: the handle doesn't carry it, so readers use the factory's `staleTime`. A factory without input takes `undefined` in the input's place.
+`experimental_queryHandleAsync` takes options for one call as its last argument. `waitFor` decides what it waits for:
 
-`queryClient.query` with `staleTime: 'static'` [replaces the deprecated `ensureQueryData`](./prefetching.md#using-query-to-prefetch): it returns cached data even if it is stale, and fetches only when the cache has none. Pass the same `staleTime` to `experimental_queryHandleAsync`:
+- `'fresh'`, the default, waits like `queryClient.query`: it uses cached data only if it isn't stale.
+- `'cached'` resolves at once with any cached data, even if stale, and waits only when the cache has none.
+
+`queryClient.query` with `staleTime: 'static'` [replaces the deprecated `ensureQueryData`](./prefetching.md#using-query-to-prefetch). `waitFor: 'cached'` waits the same way, and also refetches stale data in the background:
 
 [//]: # 'EnsureData'
 
@@ -90,7 +93,7 @@ export async function loader({ params }) {
       queryClient,
       postQuery,
       { id: params.id },
-      { staleTime: 'static' },
+      { waitFor: 'cached' },
     ),
   }
 }
@@ -98,7 +101,7 @@ export async function loader({ params }) {
 
 [//]: # 'EnsureData'
 
-The loader doesn't refetch stale data. The component that reads the handle does: it uses the factory's `staleTime`, so it refetches stale data in the background when it mounts.
+The background refetch follows the factory's `staleTime`, and its errors show up where a component reads the handle. When the cache has no post, the call fetches it once. The handle doesn't carry the option, and a factory without input takes `undefined` in the input's place.
 
 ## Reading handles
 
