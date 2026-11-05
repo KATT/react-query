@@ -1,0 +1,11 @@
+{
+  "$schema": "https://codesandbox.io/schemas/tasks.json",
+  "setupTasks": ["npm install"],
+  "tasks": {
+    "repro": {
+      "name": "🐛 Run repro",
+      "command": "npm start",
+      "runAtStart": true
+    }
+  }
+}
