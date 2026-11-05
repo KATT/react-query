@@ -251,7 +251,7 @@ describe('query handles', () => {
     })
   })
 
-  describe("with a call's staleTime", () => {
+  describe("experimental_queryHandleAsync with waitFor: 'cached'", () => {
     it('should fetch once and wait when the cache has no data', async () => {
       using _timers = fakeTimers()
       using queryClient = clearOnDispose(new QueryClient())
@@ -264,7 +264,7 @@ describe('query handles', () => {
         queryClient,
         postQuery,
         { id: '1' },
-        { staleTime: 'static' },
+        { waitFor: 'cached' },
       )
       await vi.advanceTimersByTimeAsync(10)
       const handle = await promise
@@ -273,7 +273,7 @@ describe('query handles', () => {
       expect(queryClient.getQueryData(handle.queryKey)).toBe('1')
     })
 
-    it('should resolve at once with stale cached data, and let the reader refetch it on mount', async () => {
+    it('should resolve at once with stale cached data and refetch it in the background', async () => {
       using _timers = fakeTimers()
       using queryClient = clearOnDispose(new QueryClient())
       const queryFn = vi.fn<(id: string) => Promise<string>>((id) =>
@@ -286,64 +286,16 @@ describe('query handles', () => {
         queryClient,
         postQuery,
         { id: '1' },
-        { staleTime: 'static' },
+        { waitFor: 'cached' },
       )
 
-      expect(queryFn).not.toHaveBeenCalled()
-      const observer = new QueryObserver(
-        queryClient,
-        experimental_fromHandle(postQuery, handle),
-      )
-      using _subscription = subscribe(observer, noop)
-      expect(observer.getCurrentResult().data).toBe('cached')
+      expect(queryClient.getQueryData(handle.queryKey)).toBe('cached')
       expect(queryFn).toHaveBeenCalledTimes(1)
       await vi.advanceTimersByTimeAsync(10)
-      expect(observer.getCurrentResult().data).toBe('1-new')
+      expect(queryClient.getQueryData(handle.queryKey)).toBe('1-new')
     })
 
-    it('should not start a fetch for stale cached data with experimental_queryHandle', () => {
-      using _timers = fakeTimers()
-      using queryClient = clearOnDispose(new QueryClient())
-      const queryFn = vi.fn<(id: string) => Promise<string>>((id) =>
-        sleep(10).then(() => id),
-      )
-      const postQuery = createPostQuery(queryFn)
-      queryClient.setQueryData(postQuery({ id: '1' }).queryKey, 'cached')
-
-      experimental_queryHandle(
-        queryClient,
-        postQuery,
-        { id: '1' },
-        { staleTime: 'static' },
-      )
-
-      expect(queryFn).not.toHaveBeenCalled()
-    })
-
-    it("should take undefined in the input's place for a factory without input", () => {
-      using _timers = fakeTimers()
-      using queryClient = clearOnDispose(new QueryClient())
-      const key = createKey()
-      const queryFn = vi.fn<() => Promise<string>>(() =>
-        sleep(10).then(() => 'viewer'),
-      )
-      const viewerQuery = () => ({ queryKey: key, queryFn })
-      queryClient.setQueryData(key, 'cached')
-
-      const handle = experimental_queryHandle(
-        queryClient,
-        viewerQuery,
-        undefined,
-        {
-          staleTime: 'static',
-        },
-      )
-
-      expect(queryFn).not.toHaveBeenCalled()
-      expect(handle).toStrictEqual({ queryKey: key, input: undefined })
-    })
-
-    it('should leave the staleTime out of the handle, its readers and later calls', () => {
+    it('should not refetch fresh cached data', async () => {
       using _timers = fakeTimers()
       using queryClient = clearOnDispose(new QueryClient())
       const queryFn = vi.fn<(id: string) => Promise<string>>((id) =>
@@ -356,13 +308,91 @@ describe('query handles', () => {
         staleTime: 1000,
       })
       queryClient.setQueryData(postQuery({ id: '1' }).queryKey, 'cached')
-      vi.advanceTimersByTime(1000)
 
-      const handle = experimental_queryHandle(
+      await experimental_queryHandleAsync(
         queryClient,
         postQuery,
         { id: '1' },
-        { staleTime: 'static' },
+        { waitFor: 'cached' },
+      )
+
+      expect(queryFn).not.toHaveBeenCalled()
+    })
+
+    it('should reject when the cache has no data and the fetch fails', async () => {
+      using onUnhandledRejection = unhandledRejections()
+      using queryClient = clearOnDispose(new QueryClient())
+      const postQuery = createPostQuery(() => Promise.reject(new Error('no')))
+
+      await expect(
+        experimental_queryHandleAsync(
+          queryClient,
+          postQuery,
+          { id: '1' },
+          { waitFor: 'cached' },
+        ),
+      ).rejects.toThrow('no')
+      await sleep(0)
+
+      expect(onUnhandledRejection).not.toHaveBeenCalled()
+    })
+
+    it('should not reject when the background refetch of cached data fails', async () => {
+      using onUnhandledRejection = unhandledRejections()
+      using queryClient = clearOnDispose(new QueryClient())
+      const postQuery = createPostQuery(() => Promise.reject(new Error('no')))
+      queryClient.setQueryData(postQuery({ id: '1' }).queryKey, 'cached')
+
+      const handle = await experimental_queryHandleAsync(
+        queryClient,
+        postQuery,
+        { id: '1' },
+        { waitFor: 'cached' },
+      )
+      await sleep(0)
+
+      expect(onUnhandledRejection).not.toHaveBeenCalled()
+      expect(queryClient.getQueryState(handle.queryKey)?.status).toBe('error')
+      expect(queryClient.getQueryData(handle.queryKey)).toBe('cached')
+    })
+
+    it("should take undefined in the input's place for a factory without input", async () => {
+      using _timers = fakeTimers()
+      using queryClient = clearOnDispose(new QueryClient())
+      const key = createKey()
+      const queryFn = vi.fn<() => Promise<string>>(() =>
+        sleep(10).then(() => 'viewer'),
+      )
+      const viewerQuery = () => ({ queryKey: key, queryFn })
+      queryClient.setQueryData(key, 'cached')
+
+      const handle = await experimental_queryHandleAsync(
+        queryClient,
+        viewerQuery,
+        undefined,
+        { waitFor: 'cached' },
+      )
+
+      expect(handle).toStrictEqual({ queryKey: key, input: undefined })
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+
+    it('should leave the option out of the handle and its readers', async () => {
+      using _timers = fakeTimers()
+      using queryClient = clearOnDispose(new QueryClient())
+      const key = createKey()
+      const postQuery = (input: { id: string }) => ({
+        queryKey: [...key, input.id],
+        queryFn: () => sleep(10).then(() => input.id),
+        staleTime: 1000,
+      })
+      queryClient.setQueryData(postQuery({ id: '1' }).queryKey, 'cached')
+
+      const handle = await experimental_queryHandleAsync(
+        queryClient,
+        postQuery,
+        { id: '1' },
+        { waitFor: 'cached' },
       )
 
       expect(handle).toStrictEqual({
@@ -370,9 +400,26 @@ describe('query handles', () => {
         input: { id: '1' },
       })
       expect(experimental_fromHandle(postQuery, handle).staleTime).toBe(1000)
-      expect(queryFn).not.toHaveBeenCalled()
-      experimental_queryHandle(queryClient, postQuery, { id: '1' })
-      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+
+    it("should wait for fresh data with waitFor: 'fresh', the default", async () => {
+      using _timers = fakeTimers()
+      using queryClient = clearOnDispose(new QueryClient())
+      const postQuery = createPostQuery((id) =>
+        sleep(10).then(() => `${id}-new`),
+      )
+      queryClient.setQueryData(postQuery({ id: '1' }).queryKey, 'cached')
+
+      const promise = experimental_queryHandleAsync(
+        queryClient,
+        postQuery,
+        { id: '1' },
+        { waitFor: 'fresh' },
+      )
+      await vi.advanceTimersByTimeAsync(10)
+      const handle = await promise
+
+      expect(queryClient.getQueryData(handle.queryKey)).toBe('1-new')
     })
   })
 

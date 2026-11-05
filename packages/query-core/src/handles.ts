@@ -42,42 +42,29 @@ type QueryHandleArgs<TFactory extends QueryHandleFactory> =
       : [input?: Parameters<TFactory>[0]]
 
 /**
- * A `staleTime` for a factory's query: a `StaleTime`, or what the factory's options take, like
- * `queryOptions`' function of the query.
+ * Options for one call of `experimental_queryHandleAsync`. They apply to that call only: the
+ * handle doesn't carry them.
  */
-type FactoryStaleTime<TFactory extends QueryHandleFactory> =
-  | StaleTime
-  | ('staleTime' extends keyof ReturnType<TFactory>
-      ? Exclude<ReturnType<TFactory>['staleTime'], undefined>
-      : never)
-
-/**
- * Options for one call of `experimental_queryHandle` or `experimental_queryHandleAsync`. They
- * apply to that call only: the handle doesn't carry them, so readers use the factory's options.
- */
-export interface QueryHandleCallOptions<
-  TFactory extends QueryHandleFactory = QueryHandleFactory,
-> {
+export interface QueryHandleAsyncOptions {
   /**
-   * Decides whether this call fetches, instead of the factory's `staleTime`. With `'static'`, the
-   * call uses any cached data, even if stale, and fetches only when the cache has none.
+   * What the call waits for. `'fresh'`, the default, waits like `queryClient.query`: it uses cached
+   * data only if it isn't stale. `'cached'` resolves at once with any cached data, even if stale,
+   * and waits only when the cache has none. Either way, the call starts a fetch when the factory's
+   * `staleTime` says the data is stale, and fetches once.
    */
-  staleTime?: FactoryStaleTime<TFactory>
+  waitFor?: 'fresh' | 'cached'
 }
 
 /**
- * The arguments the start functions take after the factory: its input, then options for the
- * call. A factory without input takes `undefined` in the input's place before the options.
+ * The arguments `experimental_queryHandleAsync` takes after the factory: its input, then options
+ * for the call. A factory without input takes `undefined` in the input's place before the options.
  */
-type QueryHandleStartArgs<TFactory extends QueryHandleFactory> =
+type QueryHandleAsyncArgs<TFactory extends QueryHandleFactory> =
   Parameters<TFactory> extends []
-    ? [input?: undefined, callOptions?: QueryHandleCallOptions<TFactory>]
+    ? [input?: undefined, options?: QueryHandleAsyncOptions]
     : Parameters<TFactory> extends [infer TInput, ...Array<any>]
-      ? [input: TInput, callOptions?: QueryHandleCallOptions<TFactory>]
-      : [
-          input?: Parameters<TFactory>[0],
-          callOptions?: QueryHandleCallOptions<TFactory>,
-        ]
+      ? [input: TInput, options?: QueryHandleAsyncOptions]
+      : [input?: Parameters<TFactory>[0], options?: QueryHandleAsyncOptions]
 
 type PlainTuple<
   TQueryKey extends ReadonlyArray<unknown>,
@@ -182,26 +169,11 @@ function isInfiniteOptions(options: QueryFactoryOptions): boolean {
  */
 function startQueryFromFactory(
   client: QueryClient,
-  options: QueryFactoryOptions,
+  options: QueryFactoryOptions & { staleTime?: StaleTime },
 ): Promise<unknown> {
   return isInfiniteOptions(options)
     ? client.infiniteQuery(options as never)
     : client.query(options)
-}
-
-/**
- * Builds a factory's options for a start function's arguments.
- * @param factory - The query factory.
- * @param args - The factory's input, if any, then options for the call.
- * @returns The factory's options, with the call's `staleTime` over them if it has one.
- */
-function startOptions(
-  factory: QueryHandleFactory,
-  args: Array<unknown>,
-): QueryFactoryOptions & { staleTime?: unknown } {
-  const options = args.length === 0 ? factory() : factory(args[0])
-  const staleTime = (args[1] as QueryHandleCallOptions | undefined)?.staleTime
-  return staleTime === undefined ? options : { ...options, staleTime }
 }
 
 /**
@@ -221,8 +193,7 @@ function toHandle(options: QueryFactoryOptions, input: unknown) {
  * the `queryFn` fails at once: fetch errors show up where a component reads the handle.
  * @param queryClient - The client to start the query on.
  * @param factory - The query factory, a function of the query's input that returns its options.
- * @param args - The input to pass to the factory, if it takes one, then options for this call
- * only, like a `staleTime` to decide whether to fetch.
+ * @param input - The input to pass to the factory, if it takes one.
  * @returns A handle with the query's key and input.
  * @example
  * ```ts
@@ -239,23 +210,22 @@ function toHandle(options: QueryFactoryOptions, input: unknown) {
 export function experimental_queryHandle<TFactory extends QueryHandleFactory>(
   queryClient: QueryClient,
   factory: TFactory,
-  ...args: QueryHandleStartArgs<TFactory>
+  ...input: QueryHandleArgs<TFactory>
 ): QueryHandle<TFactory> {
-  const options = startOptions(factory, args)
+  const options = factory(...input)
   void startQueryFromFactory(queryClient, options).catch(noop)
-  return toHandle(options, args[0]) as QueryHandle<TFactory>
+  return toHandle(options, input[0]) as QueryHandle<TFactory>
 }
 
 /**
  * Starts a query and waits for it like `queryClient.query`, then returns a serializable handle for
- * it. It uses cached data only if it isn't stale. Rejects if the fetch fails, so a loader can
- * redirect or show an error page. The handle carries no data; read it with `useSuspenseQuery` to
- * get defined data.
+ * it. By default it uses cached data only if it isn't stale; with `{ waitFor: 'cached' }` it uses
+ * any cached data and refetches stale data in the background. Rejects if the fetch it waits for
+ * fails, so a loader can redirect or show an error page. The handle carries no data; read it with
+ * `useSuspenseQuery` to get defined data.
  * @param queryClient - The client to start the query on.
  * @param factory - The query factory, a function of the query's input that returns its options.
- * @param args - The input to pass to the factory, if it takes one, then options for this call
- * only. With `{ staleTime: 'static' }`, it uses any cached data, even if stale, and waits only
- * when the cache has none.
+ * @param args - The input to pass to the factory, if it takes one, then options for this call.
  * @returns A promise of a handle with the query's key and input.
  * @example
  * ```ts
@@ -264,7 +234,7 @@ export function experimental_queryHandle<TFactory extends QueryHandleFactory>(
  *
  * // use any cached post, even if stale
  * const post = await experimental_queryHandleAsync(queryClient, postQuery, { id }, {
- *   staleTime: 'static',
+ *   waitFor: 'cached',
  * })
  * ```
  */
@@ -273,11 +243,21 @@ export async function experimental_queryHandleAsync<
 >(
   queryClient: QueryClient,
   factory: TFactory,
-  ...args: QueryHandleStartArgs<TFactory>
+  ...args: QueryHandleAsyncArgs<TFactory>
 ): Promise<QueryHandle<TFactory>> {
-  const options = startOptions(factory, args)
-  await startQueryFromFactory(queryClient, options)
-  return toHandle(options, args[0]) as QueryHandle<TFactory>
+  const [input, asyncOptions] = args
+  const options = args.length === 0 ? factory() : factory(input)
+  if (asyncOptions?.waitFor === 'cached') {
+    // The second call joins the first one's fetch, so an empty cache still fetches once
+    void startQueryFromFactory(queryClient, options).catch(noop)
+    await startQueryFromFactory(queryClient, {
+      ...options,
+      staleTime: 'static',
+    })
+  } else {
+    await startQueryFromFactory(queryClient, options)
+  }
+  return toHandle(options, input) as QueryHandle<TFactory>
 }
 
 /**

@@ -98,89 +98,81 @@ describe('query handles', () => {
       assertType(experimental_waterfallHandle(optionsQuery, { id: '1' }, opts))
     })
 
-    it('should take a staleTime for the call, and nothing else', async () => {
+    it('should take waitFor for an awaited call, and nothing else', async () => {
       assertType(
-        experimental_queryHandle(
+        await experimental_queryHandleAsync(
           queryClient,
           postQuery,
           { id: '1' },
+          { waitFor: 'cached' },
+        ),
+      )
+      assertType(
+        await experimental_queryHandleAsync(
+          queryClient,
+          postQuery,
+          { id: '1' },
+          { waitFor: 'fresh' },
+        ),
+      )
+      assertType(
+        await experimental_queryHandleAsync(
+          queryClient,
+          viewerQuery,
+          undefined,
+          {
+            waitFor: 'cached',
+          },
+        ),
+      )
+
+      assertType(
+        await experimental_queryHandleAsync(
+          queryClient,
+          postQuery,
+          { id: '1' },
+          // @ts-expect-error not something to wait for
+          { waitFor: 'stale' },
+        ),
+      )
+      assertType(
+        await experimental_queryHandleAsync(
+          queryClient,
+          postQuery,
+          { id: '1' },
+          // @ts-expect-error only waitFor applies to one call
           { staleTime: 'static' },
         ),
       )
       assertType(
-        await experimental_queryHandleAsync(
-          queryClient,
-          postQuery,
-          { id: '1' },
-          { staleTime: 60_000 },
-        ),
-      )
-      assertType(
-        experimental_queryHandle(
-          queryClient,
-          postQuery,
-          { id: '1' },
-          {
-            staleTime: (query) => {
-              expectTypeOf(query.state.data).toEqualTypeOf<Post | undefined>()
-              return 0
-            },
-          },
-        ),
-      )
-      assertType(
-        experimental_queryHandle(queryClient, viewerQuery, undefined, {
-          staleTime: 'static',
-        }),
-      )
-
-      assertType(
-        experimental_queryHandle(
-          queryClient,
-          postQuery,
-          { id: '1' },
-          // @ts-expect-error only staleTime applies to one call
-          { enabled: false },
-        ),
-      )
-      assertType(
-        await experimental_queryHandleAsync(
-          queryClient,
-          postQuery,
-          { id: '1' },
-          // @ts-expect-error only staleTime applies to one call
-          { staleTime: 'static', gcTime: 0 },
-        ),
-      )
-      assertType(
-        experimental_queryHandle(
-          queryClient,
-          postQuery,
-          { id: '1' },
-          // @ts-expect-error not a staleTime
-          { staleTime: 'forever' },
-        ),
-      )
-      assertType(
         // @ts-expect-error a factory without input takes undefined before the options
-        experimental_queryHandle(queryClient, viewerQuery, {
-          staleTime: 'static',
+        await experimental_queryHandleAsync(queryClient, viewerQuery, {
+          waitFor: 'cached',
         }),
+      )
+      assertType(
+        experimental_queryHandle(
+          queryClient,
+          postQuery,
+          { id: '1' },
+          // @ts-expect-error experimental_queryHandle doesn't wait, so it takes no options
+          { waitFor: 'cached' },
+        ),
       )
     })
 
-    it("should keep the call's staleTime out of the handle's type", async () => {
+    it("should keep waitFor out of the handle's type", async () => {
       const handle = await experimental_queryHandleAsync(
         queryClient,
         postQuery,
         { id: '1' },
-        { staleTime: 'static' },
+        { waitFor: 'cached' },
       )
 
       expectTypeOf(handle).toEqualTypeOf<
         experimental_QueryHandle<typeof postQuery>
       >()
-      expectTypeOf(handle).not.toHaveProperty('staleTime')
+      expectTypeOf(handle).not.toHaveProperty('waitFor')
     })
 
     it('should take an optional input', () => {
