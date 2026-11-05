@@ -38,7 +38,7 @@ describe('query handles', () => {
     using serverClient = clearOnDispose(new QueryClient())
     const handle = experimental_queryHandle(serverClient, postQuery, {
       id: '1',
-    })
+    }).handle
     const dehydrated = dehydrate(serverClient, {
       shouldDehydrateQuery: (query) =>
         defaultShouldDehydrateQuery(query) || query.state.status === 'pending',

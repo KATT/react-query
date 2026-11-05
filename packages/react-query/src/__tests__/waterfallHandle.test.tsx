@@ -12,7 +12,6 @@ import {
   QueryClient,
   experimental_fromHandle,
   experimental_queryHandle,
-  experimental_queryHandleAsync,
   experimental_waterfallHandle,
   queryOptions,
   useQuery,
@@ -69,7 +68,7 @@ describe('experimental_waterfallHandle', () => {
     const { postsQuery, queryFn } = createPostsQuery()
     const loaderHandle = experimental_queryHandle(queryClient, postsQuery, {
       page: 1,
-    })
+    }).handle
     const handles: Array<experimental_QueryHandle<typeof postsQuery>> = []
 
     function Posts(props: {
@@ -118,9 +117,9 @@ describe('experimental_waterfallHandle', () => {
     using _timers = fakeTimers()
     using queryClient = clearOnDispose(new QueryClient())
     const { postsQuery } = createPostsQuery()
-    const promise = experimental_queryHandleAsync(queryClient, postsQuery, {
+    const promise = experimental_queryHandle(queryClient, postsQuery, {
       page: 1,
-    })
+    }).promise
     await vi.advanceTimersByTimeAsync(10)
     const handle = await promise
     const statuses: Array<string> = []

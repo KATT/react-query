@@ -52,7 +52,7 @@ type FactoryStaleTime<TFactory extends QueryHandleFactory> =
       : never)
 
 /**
- * Options for one call of `experimental_queryHandle` or `experimental_queryHandleAsync`. They
+ * Options for one call of `experimental_queryHandle`. They
  * apply to that call only: the handle doesn't carry them, so readers use the factory's options.
  */
 export interface QueryHandleCallOptions<
@@ -108,8 +108,8 @@ type QueryHandleKey<TFactory extends QueryHandleFactory> = PlainQueryKey<
 >
 
 /**
- * A small serializable reference to a query, from `experimental_queryHandle`,
- * `experimental_queryHandleAsync` or `experimental_waterfallHandle`. Pass
+ * A small serializable reference to a query, from `experimental_queryHandle` or
+ * `experimental_waterfallHandle`. Pass
  * it to the component that reads the query, and rebuild the query's options there with
  * `experimental_fromHandle(factory, handle)`. It carries no data: readers get the query's data
  * from the cache.
@@ -128,6 +128,23 @@ export interface QueryHandle<
    * The query's input: the argument its factory takes.
    */
   readonly input: QueryHandleInput<TFactory>
+}
+
+/**
+ * What `experimental_queryHandle` returns. Pass `handle` to the component that reads the query.
+ * Don't return the whole object from a loader: `promise` isn't serializable.
+ */
+export interface StartedQueryHandle<
+  TFactory extends QueryHandleFactory = QueryHandleFactory,
+> {
+  /**
+   * The query's handle.
+   */
+  handle: QueryHandle<TFactory>
+  /**
+   * Resolves with `handle` once the query has data, and rejects if the fetch fails.
+   */
+  promise: Promise<QueryHandle<TFactory>>
 }
 
 /**
@@ -215,15 +232,19 @@ function toHandle(options: QueryFactoryOptions, input: unknown) {
 }
 
 /**
- * Starts a query without waiting and returns a serializable handle for it. A route loader, server
- * component or server render passes the handle to the component that reads the query. Like
- * `queryClient.query`, it fetches only if the cache has no fresh data. It never rejects, even when
- * the `queryFn` fails at once: fetch errors show up where a component reads the handle.
+ * Starts a query and returns its serializable handle, with a promise that settles when the query
+ * does. A route loader, server component or server render passes the handle to the component that
+ * reads the query. Like `queryClient.query`, it fetches only if the cache has no fresh data.
+ *
+ * The promise resolves with the same handle, and rejects if the fetch fails, so a loader can
+ * redirect or show an error page. A promise you don't await never causes an unhandled rejection:
+ * fetch errors then show up where a component reads the handle.
  * @param queryClient - The client to start the query on.
  * @param factory - The query factory, a function of the query's input that returns its options.
  * @param args - The input to pass to the factory, if it takes one, then options for this call
- * only, like a `staleTime` to decide whether to fetch.
- * @returns A handle with the query's key and input.
+ * only. With `{ staleTime: 'static' }`, it uses any cached data, even if stale, and fetches only
+ * when the cache has none.
+ * @returns The handle, and a promise of the handle once the query has data.
  * @example
  * ```ts
  * const postQuery = (input: { id: string }) =>
@@ -233,51 +254,24 @@ function toHandle(options: QueryFactoryOptions, input: unknown) {
  *   })
  *
  * // in a route loader
- * const post = experimental_queryHandle(queryClient, postQuery, { id })
+ * return {
+ *   // wait for fresh data
+ *   post: await experimental_queryHandle(queryClient, postQuery, { id }).promise,
+ *   // don't wait
+ *   comments: experimental_queryHandle(queryClient, commentsQuery, { id }).handle,
+ * }
  * ```
  */
 export function experimental_queryHandle<TFactory extends QueryHandleFactory>(
   queryClient: QueryClient,
   factory: TFactory,
   ...args: QueryHandleStartArgs<TFactory>
-): QueryHandle<TFactory> {
+): StartedQueryHandle<TFactory> {
   const options = startOptions(factory, args)
-  void startQueryFromFactory(queryClient, options).catch(noop)
-  return toHandle(options, args[0]) as QueryHandle<TFactory>
-}
-
-/**
- * Starts a query and waits for it like `queryClient.query`, then returns a serializable handle for
- * it. It uses cached data only if it isn't stale. Rejects if the fetch fails, so a loader can
- * redirect or show an error page. The handle carries no data; read it with `useSuspenseQuery` to
- * get defined data.
- * @param queryClient - The client to start the query on.
- * @param factory - The query factory, a function of the query's input that returns its options.
- * @param args - The input to pass to the factory, if it takes one, then options for this call
- * only. With `{ staleTime: 'static' }`, it uses any cached data, even if stale, and waits only
- * when the cache has none.
- * @returns A promise of a handle with the query's key and input.
- * @example
- * ```ts
- * // in a route loader
- * const post = await experimental_queryHandleAsync(queryClient, postQuery, { id })
- *
- * // use any cached post, even if stale
- * const post = await experimental_queryHandleAsync(queryClient, postQuery, { id }, {
- *   staleTime: 'static',
- * })
- * ```
- */
-export async function experimental_queryHandleAsync<
-  TFactory extends QueryHandleFactory,
->(
-  queryClient: QueryClient,
-  factory: TFactory,
-  ...args: QueryHandleStartArgs<TFactory>
-): Promise<QueryHandle<TFactory>> {
-  const options = startOptions(factory, args)
-  await startQueryFromFactory(queryClient, options)
-  return toHandle(options, args[0]) as QueryHandle<TFactory>
+  const handle = toHandle(options, args[0]) as QueryHandle<TFactory>
+  const promise = startQueryFromFactory(queryClient, options).then(() => handle)
+  promise.catch(noop)
+  return { handle, promise }
 }
 
 /**

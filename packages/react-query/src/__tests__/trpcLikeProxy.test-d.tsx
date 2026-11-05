@@ -37,45 +37,45 @@ const trpc = createOptionsProxy(router, new QueryClient())
 
 describe('a tRPC-like proxy on the public handle APIs', () => {
   it("should type the verbs' input from the procedure", () => {
-    assertType(trpc['post.byId'].$queryHandle({ id: '1' }))
+    assertType(trpc['post.byId'].$queryHandle({ id: '1' }).handle)
     // @ts-expect-error the input has the wrong shape
-    assertType(trpc['post.byId'].$queryHandle({ id: 1 }))
+    assertType(trpc['post.byId'].$queryHandle({ id: 1 }).handle)
     // @ts-expect-error a procedure whose output has no cursor has no infinite verbs
-    assertType(trpc['post.byId'].$infiniteQueryHandleAsync)
+    assertType(trpc['post.byId'].$infiniteQueryHandle)
   })
 
   it("should pass a call's staleTime through, and nothing else", async () => {
-    assertType(trpc['post.byId'].$queryHandle({ id: '1' }, { staleTime: 0 }))
     assertType(
-      await trpc['post.byId'].$queryHandleAsync(
-        { id: '1' },
-        { staleTime: 'static' },
-      ),
+      trpc['post.byId'].$queryHandle({ id: '1' }, { staleTime: 0 }).handle,
     )
     assertType(
-      await trpc.feed.$infiniteQueryHandleAsync(
+      await trpc['post.byId'].$queryHandle({ id: '1' }, { staleTime: 'static' })
+        .promise,
+    )
+    assertType(
+      await trpc.feed.$infiniteQueryHandle(
         { limit: 2 },
         { pages: 2, staleTime: 'static' },
-      ),
+      ).promise,
     )
     assertType(
       trpc['post.byId'].$queryHandle(
         { id: '1' },
         // @ts-expect-error only staleTime applies to one call
         { enabled: false },
-      ),
+      ).handle,
     )
   })
 
   it('should give awaited handles the same plain type as handles that are not awaited', async () => {
-    const post = await trpc['post.byId'].$queryHandleAsync({ id: '1' })
-    const feed = await trpc.feed.$infiniteQueryHandleAsync(
+    const post = await trpc['post.byId'].$queryHandle({ id: '1' }).promise
+    const feed = await trpc.feed.$infiniteQueryHandle(
       { limit: 2 },
       { pages: 2 },
-    )
+    ).promise
 
     expectTypeOf(post).toEqualTypeOf(
-      trpc['post.byId'].$queryHandle({ id: '1' }),
+      trpc['post.byId'].$queryHandle({ id: '1' }).handle,
     )
     expectTypeOf(post).not.toHaveProperty('data')
     expectTypeOf(post.input).toEqualTypeOf<{ id: string }>()
@@ -85,9 +85,9 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
   })
 
   it('should read any handle without naming its procedure', async () => {
-    const post = trpc['post.byId'].$queryHandle({ id: '1' })
-    const awaited = await trpc['post.byId'].$queryHandleAsync({ id: '1' })
-    const feed = await trpc.feed.$infiniteQueryHandleAsync({ limit: 2 })
+    const post = trpc['post.byId'].$queryHandle({ id: '1' }).handle
+    const awaited = await trpc['post.byId'].$queryHandle({ id: '1' }).promise
+    const feed = await trpc.feed.$infiniteQueryHandle({ limit: 2 }).promise
 
     expectTypeOf(
       useSuspenseQuery(trpc.$fromHandle(post)).data,
@@ -107,7 +107,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
   })
 
   it('should type select from the procedure when read-site options are spread', () => {
-    const post = trpc['post.byId'].$queryHandle({ id: '1' })
+    const post = trpc['post.byId'].$queryHandle({ id: '1' }).handle
 
     const { data } = useSuspenseQuery({
       ...trpc.$fromHandle(post),
@@ -125,9 +125,9 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
       post: experimental_QueryHandle<TRPC['post.byId']['queryOptions']>
     }
 
-    expectTypeOf(trpc['post.byId'].$queryHandle({ id: '1' })).toEqualTypeOf(
-      props.post,
-    )
+    expectTypeOf(
+      trpc['post.byId'].$queryHandle({ id: '1' }).handle,
+    ).toEqualTypeOf(props.post)
     expectTypeOf(
       useSuspenseQuery(trpc.$fromHandle(props.post)).data,
     ).toEqualTypeOf<Post>()
@@ -153,7 +153,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
     const comments = trpc['post.comments'].$queryHandle({
       postId: '1',
       page: 1,
-    })
+    }).handle
 
     const next = experimental_waterfallHandle(
       trpc['post.comments'].queryOptions,
@@ -171,8 +171,8 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
   })
 
   it("should infer a procedure's data from its factory, the same as useSuspenseQuery", async () => {
-    const post = trpc['post.byId'].$queryHandle({ id: '1' })
-    const feed = await trpc.feed.$infiniteQueryHandleAsync({ limit: 2 })
+    const post = trpc['post.byId'].$queryHandle({ id: '1' }).handle
+    const feed = await trpc.feed.$infiniteQueryHandle({ limit: 2 }).promise
 
     expectTypeOf<
       experimental_InferQueryHandleData<TRPC['post.byId']['queryOptions']>

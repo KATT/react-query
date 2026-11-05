@@ -1,7 +1,6 @@
 import {
   experimental_fromHandle,
   experimental_queryHandle,
-  experimental_queryHandleAsync,
   infiniteQueryOptions,
   queryOptions,
 } from '..'
@@ -12,6 +11,7 @@ import type {
   experimental_QueryHandle,
   experimental_QueryHandleCallOptions,
   experimental_QueryHandleFactory,
+  experimental_StartedQueryHandle,
 } from '..'
 
 // A small tRPC-like options proxy that uses only the public handle APIs
@@ -80,15 +80,13 @@ type DecorateInfiniteProcedure<
         TInput,
         TOutput
       >
-      $infiniteQueryHandleAsync: (
+      $infiniteQueryHandle: (
         input: Omit<TInput, 'cursor'>,
         opts?: { pages?: number } & experimental_QueryHandleCallOptions<
           ProcedureInfiniteQueryOptions<TPath, TInput, TOutput>
         >,
-      ) => Promise<
-        experimental_QueryHandle<
-          ProcedureInfiniteQueryOptions<TPath, TInput, TOutput>
-        >
+      ) => experimental_StartedQueryHandle<
+        ProcedureInfiniteQueryOptions<TPath, TInput, TOutput>
       >
     }
   : {}
@@ -103,15 +101,7 @@ type DecorateProcedure<
     callOptions?: experimental_QueryHandleCallOptions<
       ProcedureQueryOptions<TPath, TProcedure>
     >,
-  ) => experimental_QueryHandle<ProcedureQueryOptions<TPath, TProcedure>>
-  $queryHandleAsync: (
-    input: InputOf<TProcedure>,
-    callOptions?: experimental_QueryHandleCallOptions<
-      ProcedureQueryOptions<TPath, TProcedure>
-    >,
-  ) => Promise<
-    experimental_QueryHandle<ProcedureQueryOptions<TPath, TProcedure>>
-  >
+  ) => experimental_StartedQueryHandle<ProcedureQueryOptions<TPath, TProcedure>>
 } & DecorateInfiniteProcedure<TPath, TProcedure>
 
 type ProcedureFactory<TRouter extends AnyRouter> = {
@@ -194,16 +184,11 @@ export function createOptionsProxy<TRouter extends AnyRouter>(
         input: unknown,
         callOptions?: experimental_QueryHandleCallOptions<typeof factory>,
       ) => experimental_queryHandle(queryClient, factory, input, callOptions),
-      $queryHandleAsync: (
-        input: unknown,
-        callOptions?: experimental_QueryHandleCallOptions<typeof factory>,
-      ) =>
-        experimental_queryHandleAsync(queryClient, factory, input, callOptions),
-      $infiniteQueryHandleAsync: (
+      $infiniteQueryHandle: (
         input: object,
         opts?: { pages?: number; staleTime?: StaleTime },
       ) =>
-        experimental_queryHandleAsync(
+        experimental_queryHandle(
           queryClient,
           (pageInput: object) => ({
             ...infiniteFactory(pageInput),

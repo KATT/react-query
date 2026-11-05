@@ -48,7 +48,6 @@ export { streamedQuery as experimental_streamedQuery } from './streamedQuery'
 export {
   experimental_fromHandle,
   experimental_queryHandle,
-  experimental_queryHandleAsync,
   experimental_waterfallHandle,
 } from './handles'
 export type {
@@ -57,6 +56,7 @@ export type {
   QueryHandle as experimental_QueryHandle,
   QueryHandleCallOptions as experimental_QueryHandleCallOptions,
   QueryHandleFactory as experimental_QueryHandleFactory,
+  StartedQueryHandle as experimental_StartedQueryHandle,
 } from './handles'
 
 // Types

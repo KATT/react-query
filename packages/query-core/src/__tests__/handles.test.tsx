@@ -12,7 +12,6 @@ import {
   environmentManager,
   experimental_fromHandle,
   experimental_queryHandle,
-  experimental_queryHandleAsync,
   experimental_waterfallHandle,
   noop,
 } from '..'
@@ -57,7 +56,7 @@ describe('query handles', () => {
 
       const handle = experimental_queryHandle(queryClient, postQuery, {
         id: '1',
-      })
+      }).handle
 
       expect(handle).toStrictEqual({
         queryKey: postQuery({ id: '1' }).queryKey,
@@ -78,12 +77,12 @@ describe('query handles', () => {
         queryFn: () => 'viewer',
       })
 
-      const handle = experimental_queryHandle(queryClient, viewerQuery)
+      const handle = experimental_queryHandle(queryClient, viewerQuery).handle
 
       expect(handle).toStrictEqual({ queryKey: key, input: undefined })
     })
 
-    it('should not throw when the query fails', async () => {
+    it('should not throw when the query fails and the promise is ignored', async () => {
       using _timers = fakeTimers()
       using queryClient = clearOnDispose(new QueryClient())
       const postQuery = createPostQuery(() => Promise.reject(new Error('no')))
@@ -96,7 +95,7 @@ describe('query handles', () => {
       ).toBe('error')
     })
 
-    it('should not cause an unhandled rejection when the queryFn rejects at once', async () => {
+    it('should not cause an unhandled rejection when the queryFn rejects at once and the promise is ignored', async () => {
       using onUnhandledRejection = unhandledRejections()
       using queryClient = clearOnDispose(new QueryClient())
       const postQuery = createPostQuery(() => Promise.reject(new Error('no')))
@@ -110,7 +109,7 @@ describe('query handles', () => {
       ).toBe('error')
     })
 
-    it('should not cause an unhandled rejection when the queryFn throws synchronously', async () => {
+    it('should not cause an unhandled rejection when the queryFn throws synchronously and the promise is ignored', async () => {
       using onUnhandledRejection = unhandledRejections()
       using queryClient = clearOnDispose(new QueryClient())
       const postQuery = createPostQuery(() => {
@@ -183,22 +182,19 @@ describe('query handles', () => {
     })
   })
 
-  describe('experimental_queryHandleAsync', () => {
-    it('should wait for the data and return a plain handle', async () => {
+  describe("experimental_queryHandle's promise", () => {
+    it('should resolve with the same handle once the query has data', async () => {
       using _timers = fakeTimers()
       using queryClient = clearOnDispose(new QueryClient())
       const postQuery = createPostQuery()
 
-      const promise = experimental_queryHandleAsync(queryClient, postQuery, {
+      const started = experimental_queryHandle(queryClient, postQuery, {
         id: '1',
       })
       await vi.advanceTimersByTimeAsync(10)
-      const handle = await promise
+      const handle = await started.promise
 
-      expect(handle).toStrictEqual({
-        queryKey: postQuery({ id: '1' }).queryKey,
-        input: { id: '1' },
-      })
+      expect(handle).toBe(started.handle)
       expect(queryClient.getQueryData(handle.queryKey)).toBe('1')
     })
 
@@ -210,9 +206,9 @@ describe('query handles', () => {
       )
       queryClient.setQueryData(postQuery({ id: '1' }).queryKey, 'cached')
 
-      const promise = experimental_queryHandleAsync(queryClient, postQuery, {
+      const promise = experimental_queryHandle(queryClient, postQuery, {
         id: '1',
-      })
+      }).promise
       await vi.advanceTimersByTimeAsync(10)
       const handle = await promise
 
@@ -225,7 +221,19 @@ describe('query handles', () => {
       const postQuery = createPostQuery(() => Promise.reject(new Error('no')))
 
       await expect(
-        experimental_queryHandleAsync(queryClient, postQuery, { id: '1' }),
+        experimental_queryHandle(queryClient, postQuery, { id: '1' }).promise,
+      ).rejects.toThrow('no')
+    })
+
+    it('should reject when the queryFn throws synchronously', async () => {
+      using _timers = fakeTimers()
+      using queryClient = clearOnDispose(new QueryClient())
+      const postQuery = createPostQuery(() => {
+        throw new Error('no')
+      })
+
+      await expect(
+        experimental_queryHandle(queryClient, postQuery, { id: '1' }).promise,
       ).rejects.toThrow('no')
     })
 
@@ -242,7 +250,8 @@ describe('query handles', () => {
       })
       queryClient.setQueryData(key, { pages: [10], pageParams: [1] })
 
-      await experimental_queryHandleAsync(queryClient, feedQuery, { pages: 2 })
+      await experimental_queryHandle(queryClient, feedQuery, { pages: 2 })
+        .promise
 
       expect(queryClient.getQueryData(key)).toStrictEqual({
         pages: [10, 20],
@@ -260,12 +269,12 @@ describe('query handles', () => {
       )
       const postQuery = createPostQuery(queryFn)
 
-      const promise = experimental_queryHandleAsync(
+      const promise = experimental_queryHandle(
         queryClient,
         postQuery,
         { id: '1' },
         { staleTime: 'static' },
-      )
+      ).promise
       await vi.advanceTimersByTimeAsync(10)
       const handle = await promise
 
@@ -282,12 +291,12 @@ describe('query handles', () => {
       const postQuery = createPostQuery(queryFn)
       queryClient.setQueryData(postQuery({ id: '1' }).queryKey, 'cached')
 
-      const handle = await experimental_queryHandleAsync(
+      const handle = await experimental_queryHandle(
         queryClient,
         postQuery,
         { id: '1' },
         { staleTime: 'static' },
-      )
+      ).promise
 
       expect(queryFn).not.toHaveBeenCalled()
       const observer = new QueryObserver(
@@ -337,7 +346,7 @@ describe('query handles', () => {
         {
           staleTime: 'static',
         },
-      )
+      ).handle
 
       expect(queryFn).not.toHaveBeenCalled()
       expect(handle).toStrictEqual({ queryKey: key, input: undefined })
@@ -363,7 +372,7 @@ describe('query handles', () => {
         postQuery,
         { id: '1' },
         { staleTime: 'static' },
-      )
+      ).handle
 
       expect(handle).toStrictEqual({
         queryKey: postQuery({ id: '1' }).queryKey,
@@ -395,9 +404,9 @@ describe('query handles', () => {
       expect(queryFn).toHaveBeenCalledTimes(2)
       await vi.advanceTimersByTimeAsync(10)
 
-      const fetched = experimental_queryHandleAsync(queryClient, postQuery, {
+      const fetched = experimental_queryHandle(queryClient, postQuery, {
         id: '1',
-      })
+      }).promise
       expect(queryFn).toHaveBeenCalledTimes(3)
       await vi.advanceTimersByTimeAsync(10)
       await expect(fetched).resolves.toStrictEqual({
@@ -419,13 +428,14 @@ describe('query handles', () => {
       )
       const postQuery = createPostQuery(queryFn)
 
-      const first = experimental_queryHandleAsync(queryClient, postQuery, {
+      const first = experimental_queryHandle(queryClient, postQuery, {
         id: '1',
-      })
+      }).promise
       await vi.advanceTimersByTimeAsync(10)
       await first
       experimental_queryHandle(queryClient, postQuery, { id: '1' })
-      await experimental_queryHandleAsync(queryClient, postQuery, { id: '1' })
+      await experimental_queryHandle(queryClient, postQuery, { id: '1' })
+        .promise
 
       expect(queryFn).toHaveBeenCalledTimes(1)
     })
@@ -438,7 +448,7 @@ describe('query handles', () => {
       const postQuery = createPostQuery()
       const handle = experimental_queryHandle(queryClient, postQuery, {
         id: '1',
-      })
+      }).handle
 
       const options = experimental_fromHandle(postQuery, handle)
 
@@ -455,7 +465,7 @@ describe('query handles', () => {
       const postQuery = createPostQuery()
       const handle = experimental_queryHandle(queryClient, postQuery, {
         id: '1',
-      })
+      }).handle
       await vi.advanceTimersByTimeAsync(10)
 
       const observer = new QueryObserver(queryClient, {
@@ -470,9 +480,9 @@ describe('query handles', () => {
       using _timers = fakeTimers()
       using queryClient = clearOnDispose(new QueryClient())
       const postQuery = createPostQuery()
-      const promise = experimental_queryHandleAsync(queryClient, postQuery, {
+      const promise = experimental_queryHandle(queryClient, postQuery, {
         id: '1',
-      })
+      }).promise
       await vi.advanceTimersByTimeAsync(10)
       const handle = await promise
 
@@ -486,9 +496,9 @@ describe('query handles', () => {
       using _timers = fakeTimers()
       using queryClient = clearOnDispose(new QueryClient())
       const postQuery = createPostQuery()
-      const promise = experimental_queryHandleAsync(queryClient, postQuery, {
+      const promise = experimental_queryHandle(queryClient, postQuery, {
         id: '1',
-      })
+      }).promise
       await vi.advanceTimersByTimeAsync(10)
       const handle = await promise
       const options = {
@@ -549,7 +559,7 @@ describe('query handles', () => {
       })
       const previous = experimental_queryHandle(queryClient, postQuery, {
         id: '1',
-      })
+      }).handle
 
       expect(
         experimental_waterfallHandle(postQuery, previous, (input) => ({
