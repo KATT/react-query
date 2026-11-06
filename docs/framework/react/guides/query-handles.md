@@ -16,7 +16,7 @@ Handles come from query factories: functions of one input (or none) that return 
 [//]: # 'Factories'
 
 ```tsx
-import { queryOptions } from '@tanstack/react-query'
+import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query'
 
 export const postQuery = (input: { id: string }) =>
   queryOptions({
@@ -30,160 +30,192 @@ export const viewerQuery = () =>
     queryKey: ['viewer'] as const,
     queryFn: fetchViewer,
   })
+
+export const authorPostsQuery = (input: { authorId: string }) =>
+  queryOptions({
+    queryKey: ['posts', 'by-author', input.authorId] as const,
+    queryFn: () => fetchAuthorPosts(input.authorId),
+  })
+
+export const commentsQuery = (input: { postId: string }) =>
+  infiniteQueryOptions({
+    queryKey: ['comments', input.postId] as const,
+    queryFn: ({ pageParam }) => fetchComments(input.postId, pageParam),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => lastPage.nextPage,
+  })
 ```
 
 [//]: # 'Factories'
 
 A handle's type comes from its factory's key. Declare keys with `as const`: two factories with the same input and data then still produce different handle types, and passing one factory's handle to another is a type error.
 
-## Starting queries
+## Loading queries
 
-Three functions start a query and return its handle. They take the `QueryClient` first, then the factory, then the factory's input:
-
-| Function                         | Waits for                     |
-| -------------------------------- | ----------------------------- |
-| `experimental_queryHandle`       | nothing                       |
-| `experimental_queryHandleAsync`  | fresh data                    |
-| `experimental_ensureQueryHandle` | any data, even if it is stale |
-
-At runtime, all three return the same plain `{ queryKey, input }` handle, without the query's data. In types, the two awaited functions return an `experimental_DefinedQueryHandle`: when it resolves, the cache has the query's data, so `experimental_getQueryHandleData` can read it.
-
-`experimental_queryHandle` and `experimental_queryHandleAsync` use the query's `staleTime` like `queryClient.query`: they start a fetch only when the cache has no fresh data.
-
-`experimental_queryHandle` doesn't wait and doesn't reject: fetch errors show up where a component reads the handle. The other two reject when the fetch they wait for fails, so a loader can redirect or show an error page.
+`experimental_loadQueryHandles` starts a loader's queries and returns their handles. It takes the `QueryClient` and a callback. The callback gets `load`, starts each query with it, and returns the queries by name:
 
 [//]: # 'Loader'
 
 ```tsx
-import {
-  experimental_queryHandle,
-  experimental_queryHandleAsync,
-} from '@tanstack/react-query'
+import { experimental_loadQueryHandles } from '@tanstack/react-query'
 
-export async function loader({ params }) {
-  return {
-    // Start the post without waiting, and stream it in
-    post: experimental_queryHandle(queryClient, postQuery, {
-      id: params.id,
-    }),
-    // The page can't render without the viewer, so wait for it
-    viewer: await experimental_queryHandleAsync(queryClient, viewerQuery),
-  }
-}
+export const Route = createFileRoute('/posts/$id')({
+  loader: async ({ context: { queryClient }, params }) => {
+    const { handles } = await experimental_loadQueryHandles(
+      queryClient,
+      (load) => ({
+        // The page can't render without the post, so wait for it
+        post: load.wait(postQuery, { id: params.id }),
+        // Start the viewer without waiting, and stream it in
+        viewer: load.start(viewerQuery),
+      }),
+    )
+    return handles
+  },
+})
 ```
 
 [//]: # 'Loader'
 
+`load` has three ways to start a query. Each takes the factory, then the factory's input:
+
+| Function      | Waits for                     |
+| ------------- | ----------------------------- |
+| `load.start`  | nothing                       |
+| `load.wait`   | fresh data                    |
+| `load.ensure` | any data, even if it is stale |
+
+`load.start` and `load.wait` use the query's `staleTime` like `queryClient.query`: they fetch only when the cache has no fresh data. `load.start` doesn't wait and doesn't reject: fetch errors show up where a component reads the handle.
+
+Every query starts before anything waits. The callback can't be async, and `load` throws once the callback returns, so you can't start a query after an `await`. The promise resolves when every query the load waits for has data, and rejects as soon as one of them fails, so a loader can redirect or show an error page.
+
+It resolves to two objects:
+
+- `handles`: a handle for every query, by name. Return them from the loader, or pass them as props.
+- `data`: the data of every query from `load.wait` and `load.ensure`, by name, like `useSuspenseQuery`'s `data`. Queries from `load.start` have no data yet, so `data` leaves them out.
+
+### Not found and redirects
+
+Use `data` to decide what the loader does, like throwing `notFound()` when a post doesn't exist:
+
+[//]: # 'NotFound'
+
+```tsx
+loader: async ({ context: { queryClient }, params }) => {
+  const { handles, data } = await experimental_loadQueryHandles(
+    queryClient,
+    (load) => ({
+      post: load.wait(postQuery, { id: params.id }),
+      viewer: load.start(viewerQuery),
+    }),
+  )
+  if (!data.post) throw notFound()
+  return handles
+}
+```
+
+[//]: # 'NotFound'
+
+The viewer started together with the post, so checking the post doesn't hold it back.
+
 ### Using cached data, even if stale
 
-`experimental_ensureQueryHandle` is the handle version of `queryClient.query` with `staleTime: 'static'`, which [replaces the deprecated `ensureQueryData`](./prefetching.md#using-query-to-prefetch). If the cache has data, even stale data, it resolves at once without fetching. If not, it fetches once and waits:
+`load.ensure` is the handle version of `queryClient.query` with `staleTime: 'static'`, which [replaces the deprecated `ensureQueryData`](./prefetching.md#using-query-to-prefetch). If the cache has data, even stale data, it resolves at once without fetching. If not, it fetches once and waits:
 
 [//]: # 'EnsureData'
 
 ```tsx
-import { experimental_ensureQueryHandle } from '@tanstack/react-query'
-
-export async function loader({ params }) {
-  return {
+const { handles } = await experimental_loadQueryHandles(
+  queryClient,
+  (load) => ({
     // If we have the post loaded already, we don't want to block on a refetch.
     // Otherwise wait for it, and throw if it fails
-    post: await experimental_ensureQueryHandle(queryClient, postQuery, {
-      id: params.id,
-    }),
-  }
-}
+    post: load.ensure(postQuery, { id: params.id }),
+  }),
+)
 ```
 
 [//]: # 'EnsureData'
 
 The loader doesn't refetch stale data. The component that reads the handle does: it uses the factory's `staleTime`, so it refetches stale data in the background when it mounts.
 
-### Reading awaited data in a loader
+### Queries that need another query's data
 
-Sometimes the loader needs the data itself, for example to throw `notFound()` when a post doesn't exist. `experimental_getQueryHandleData(queryClient, factory, handle)` reads it from the cache. It takes only handles from `experimental_queryHandleAsync` and `experimental_ensureQueryHandle`, which wait for data. Passing a handle from `experimental_queryHandle` is a type error, because its query may not have data yet.
+Sometimes a query's input comes from another query's data. The page shows more posts by the post's author, and only the post knows the author. `load.after` starts such a query as soon as the other query's data is in the cache:
 
-[//]: # 'LoaderData'
+[//]: # 'After'
 
 ```tsx
-import {
-  experimental_getQueryHandleData,
-  experimental_queryHandle,
-  experimental_queryHandleAsync,
-} from '@tanstack/react-query'
-
-export async function loader({ params }) {
-  // Start the viewer first, so it loads while the loader waits for the post
-  const viewer = experimental_queryHandle(queryClient, viewerQuery)
-  const post = await experimental_queryHandleAsync(queryClient, postQuery, {
-    id: params.id,
-  })
-  if (!experimental_getQueryHandleData(queryClient, postQuery, post)) {
-    throw notFound()
-  }
-  return { viewer, post }
-}
+const { handles, data } = await experimental_loadQueryHandles(
+  queryClient,
+  (load) => {
+    const post = load.wait(postQuery, { id: params.id })
+    return {
+      post,
+      viewer: load.start(viewerQuery),
+      morePosts: load.after(post, (post) =>
+        post ? load.start(authorPostsQuery, { authorId: post.authorId }) : null,
+      ),
+    }
+  },
+)
+if (!data.post) throw notFound()
+return handles
 ```
 
-[//]: # 'LoaderData'
+[//]: # 'After'
 
-> [!WARNING]
-> Use the data for decisions in the loader, like throwing `notFound()` or redirecting. Don't build other queries' inputs from it: those queries would wait for this one, which is a waterfall. Start independent handles before you await.
+`load.after` takes a query from `load.wait`, `load.ensure` or another `load.after`, and a callback that gets its data and starts the dependent query with `load`. Return `null` to start nothing; the handle is then `null`. The viewer doesn't wait for the post, and the author's posts don't wait for the viewer. The load waits for the post, and for the author's posts only if the callback used `load.wait` or `load.ensure`.
 
-`experimental_getQueryHandleData` never fetches, waits or creates a query. It returns what the factory's `select` returns, or else the `queryFn`'s data.
+To end the load early, throw from the callback: `if (!post) throw notFound()`. The load rejects at once, without waiting for its other queries.
+
+### Infinite queries
+
+Infinite factories work like the others. Their `data` is `InfiniteData`, with `pages` and `pageParams`. To fetch more than the first page, pass `pages` after the input:
+
+[//]: # 'Infinite'
+
+```tsx
+const { handles, data } = await experimental_loadQueryHandles(
+  queryClient,
+  (load) => ({
+    post: load.wait(postQuery, { id: params.id }),
+    comments: load.wait(commentsQuery, { postId: params.id }, { pages: 2 }),
+  }),
+)
+data.comments.pages // the first two pages
+```
+
+[//]: # 'Infinite'
+
+`pages` is the number of pages the load fetches, starting from the first, like the `pages` option of `queryClient.infiniteQuery`. It stays out of the factory, so readers don't get it: when they refetch, they fetch every page they have.
 
 ### Pitfalls
 
-**Awaiting one handle after another.** Each `await` waits for its query before the next one starts:
+**Awaiting before the load.** Anything you await before `experimental_loadQueryHandles` holds back every query in it:
 
-[//]: # 'SequentialAwaits'
-
-```tsx
-// The viewer starts only after the post has loaded
-const post = await experimental_ensureQueryHandle(queryClient, postQuery, {
-  id,
-})
-const viewer = await experimental_queryHandleAsync(queryClient, viewerQuery)
-```
-
-[//]: # 'SequentialAwaits'
-
-Await them together instead:
-
-[//]: # 'PromiseAll'
+[//]: # 'AwaitBefore'
 
 ```tsx
-const [post, viewer] = await Promise.all([
-  experimental_ensureQueryHandle(queryClient, postQuery, { id }),
-  experimental_queryHandleAsync(queryClient, viewerQuery),
-])
+// Every query in the load waits for the session
+const session = await getSession()
+const { handles } = await experimental_loadQueryHandles(
+  queryClient,
+  (load) => ({
+    viewer: load.start(viewerQuery),
+  }),
+)
 ```
 
-[//]: # 'PromiseAll'
+[//]: # 'AwaitBefore'
 
-For named results, define a small `allKeyed`. It mirrors [`Promise.allKeyed`](https://github.com/tc39/proposal-await-dictionary), a Stage 3 TC39 proposal, without patching `Promise`:
+Make it a query and start it in the same load, or start the load first and await both with `Promise.all`.
 
-[//]: # 'PromiseAllKeyed'
+**Two loads in a row.** The second load starts only when the first resolves. Put the queries in one load, and use `load.after` for the ones that need another query's data.
 
-```tsx
-async function allKeyed<T extends Record<string, unknown>>(
-  record: T,
-): Promise<{ [K in keyof T]: Awaited<T[K]> }> {
-  const keys = Object.keys(record)
-  const values = await Promise.all(keys.map((key) => record[key]))
-  return Object.fromEntries(keys.map((key, i) => [key, values[i]])) as any
-}
+**`load.after` when you already have the input.** The input of the author's posts is in the post's data, so `load.after` is right there. The post's comments only need the post's id, which the loader already has in `params`. Start them with `load.start(commentsQuery, { postId: params.id })`, not inside `load.after`, or they wait for the post for nothing.
 
-const { post, viewer } = await allKeyed({
-  post: experimental_ensureQueryHandle(queryClient, postQuery, { id }),
-  viewer: experimental_queryHandleAsync(queryClient, viewerQuery),
-})
-```
-
-[//]: # 'PromiseAllKeyed'
-
-**Starting a handle after an await.** `experimental_queryHandle` doesn't wait, but it only starts when the loader reaches it, and after an `await` that is late. Start every handle before the first `await`.
-
-**Building another query's input from awaited data.** See the warning in [Reading awaited data in a loader](#reading-awaited-data-in-a-loader).
+**Started queries after `load.after`.** A dependent query's handle needs its parent's data, so the load waits for the parent even when the callback uses `load.start`.
 
 ## Reading handles
 
@@ -211,7 +243,7 @@ function Post(props: { post: experimental_QueryHandle<typeof postQuery> }) {
 
 The factory types `select`'s argument, as with any `queryOptions` result. A `select` in the factory works too: readers get the selected type, and a read-site `select` replaces it. Keep options that decide how the query fetches or how long its data stays fresh, like `queryFn` or `staleTime`, on the factory, so the loader and the component agree on them.
 
-Readers get the query's data from the cache. To get defined `data`, read the handle with `useSuspenseQuery`, which waits for the data. To type a prop that takes that data, use `experimental_InferQueryHandleData<typeof postQuery>`, which gives the same type as `useSuspenseQuery`'s `data`. `useQuery` types `data` as possibly `undefined`, as usual, even for a handle a loader waited for: the cache may have lost the data since, for example after `queryClient.clear()`.
+Readers get the query's data from the cache. To get defined `data`, read the handle with `useSuspenseQuery`, which waits for the data. To type a prop that takes that data, use `experimental_InferQueryHandleData<typeof postQuery>`, which gives the same type as `useSuspenseQuery`'s `data`. `useQuery` types `data` as possibly `undefined`, as usual, even for a query the load waited for: the cache may have lost the data since, for example after `queryClient.clear()`.
 
 ## Waterfalls: `experimental_waterfallHandle`
 
@@ -232,7 +264,7 @@ function Search(props: { term: string }) {
 
 [//]: # 'WaterfallInput'
 
-When the input comes from another query's data, the dependency is real: the author's other posts can't start until the post's data arrives. Start the dependent query in the component that has that data:
+When the input comes from another query's data and the loader didn't start that query, start the dependent query in the component that has the data. If the loader starts both, use [`load.after`](#queries-that-need-another-querys-data) instead, so the dependent query starts before the page renders:
 
 [//]: # 'WaterfallDependent'
 
@@ -290,7 +322,7 @@ Queries you start with handles work with the [hydration APIs](./advanced-ssr.md)
 
 ### Streaming pending queries
 
-`dehydrate` only includes successful queries by default. To stream a query that `experimental_queryHandle` started and that is still pending, opt in through `shouldDehydrateQuery`. A pending query dehydrates to a promise, so the page needs a transport that can send promises, like React Server Components, TanStack Start or React Router:
+`dehydrate` only includes successful queries by default. To stream a query that `load.start` started and that is still pending, opt in through `shouldDehydrateQuery`. A pending query dehydrates to a promise, so the page needs a transport that can send promises, like React Server Components, TanStack Start or React Router:
 
 [//]: # 'DehydratePending'
 
@@ -309,6 +341,50 @@ const queryClient = new QueryClient({
 
 [//]: # 'DehydratePending'
 
+A Server Component can then wait for the post and stream the comments:
+
+[//]: # 'StreamingPage'
+
+```tsx
+// app/posts/[id]/page.tsx
+export default async function PostPage({ params }) {
+  const queryClient = getQueryClient()
+  const { handles, data } = await experimental_loadQueryHandles(
+    queryClient,
+    (load) => ({
+      post: load.wait(postQuery, { id: params.id }),
+      comments: load.start(commentsQuery, { postId: params.id }),
+    }),
+  )
+  if (!data.post) notFound()
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <Post post={handles.post} />
+      <Suspense fallback={<Spinner />}>
+        <Comments comments={handles.comments} />
+      </Suspense>
+    </HydrationBoundary>
+  )
+}
+
+// app/posts/[id]/comments.tsx
+;('use client')
+
+export function Comments(props: {
+  comments: experimental_QueryHandle<typeof commentsQuery>
+}) {
+  const { data } = useSuspenseInfiniteQuery(
+    experimental_fromHandle(commentsQuery, props.comments),
+  )
+  return <CommentList comments={data.pages.flatMap((page) => page.comments)} />
+}
+```
+
+[//]: # 'StreamingPage'
+
+The post arrives with the page. The comments arrive when their query finishes, and the browser doesn't fetch them again.
+
 ### Server `staleTime`
 
 Queries started on the server follow the same `staleTime` rules as in the browser. The data a server render sends along is as old as the server fetch, and when the browser reads it, a query with the default `staleTime: 0` already counts as stale. The component that reads it refetches on mount, so each request runs twice: once on the server and once in the browser.
@@ -324,10 +400,15 @@ const postQuery = (input: { id: string }) =>
   })
 
 // On the server: fetches the post, and sends it along with the page
-const post = await experimental_queryHandleAsync(queryClient, postQuery, { id })
+const { handles } = await experimental_loadQueryHandles(
+  queryClient,
+  (load) => ({
+    post: load.wait(postQuery, { id }),
+  }),
+)
 
 // In the browser: the post is already stale, so this fetches it again on mount
-const { data } = useQuery(experimental_fromHandle(postQuery, post))
+const { data } = useQuery(experimental_fromHandle(postQuery, handles.post))
 ```
 
 [//]: # 'StaleTimeDoubleFetch'
