@@ -11,8 +11,7 @@ import {
 import {
   QueryClient,
   experimental_fromHandle,
-  experimental_queryHandle,
-  experimental_queryHandleAsync,
+  experimental_loadQueryHandles,
   experimental_waterfallHandle,
   queryOptions,
   useQuery,
@@ -67,9 +66,11 @@ describe('experimental_waterfallHandle', () => {
     using _timers = fakeTimers()
     using queryClient = clearOnDispose(new QueryClient())
     const { postsQuery, queryFn } = createPostsQuery()
-    const loaderHandle = experimental_queryHandle(queryClient, postsQuery, {
-      page: 1,
-    })
+    const {
+      handles: { posts: loaderHandle },
+    } = await experimental_loadQueryHandles(queryClient, (load) => ({
+      posts: load.start(postsQuery, { page: 1 }),
+    }))
     const handles: Array<experimental_QueryHandle<typeof postsQuery>> = []
 
     function Posts(props: {
@@ -114,15 +115,15 @@ describe('experimental_waterfallHandle', () => {
     expect(queryFn).toHaveBeenCalledTimes(2)
   })
 
-  it('should give useQuery the cached data of an awaited handle on the first render', async () => {
+  it('should give useQuery the cached data of a waited handle on the first render', async () => {
     using _timers = fakeTimers()
     using queryClient = clearOnDispose(new QueryClient())
     const { postsQuery } = createPostsQuery()
-    const promise = experimental_queryHandleAsync(queryClient, postsQuery, {
-      page: 1,
-    })
+    const promise = experimental_loadQueryHandles(queryClient, (load) => ({
+      posts: load.wait(postsQuery, { page: 1 }),
+    }))
     await vi.advanceTimersByTimeAsync(10)
-    const handle = await promise
+    const handle = (await promise).handles.posts
     const statuses: Array<string> = []
 
     function Posts() {

@@ -53,23 +53,22 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
 
     using serverClient = clearOnDispose(new QueryClient())
     const serverTrpc = createOptionsProxy(router, serverClient)
-    const postPromise = serverTrpc['post.byId'].$queryHandleAsync({ id: '1' })
-    const feedPromise = serverTrpc.feed.$infiniteQueryHandleAsync(
-      { limit: 10 },
-      { pages: 2 },
-    )
-    await vi.advanceTimersByTimeAsync(10)
-    const post = await postPromise
-    expect(serverTrpc.$getQueryHandleData(post)).toStrictEqual({
-      id: '1',
-      title: 'post 1',
-    })
-    const comments = serverTrpc['post.comments'].$queryHandle({
-      postId: post.input.id,
-      page: 1,
-    })
-    await vi.advanceTimersByTimeAsync(10)
-    const feed = await feedPromise
+    const loaded = serverTrpc.$loadHandles((load) => ({
+      post: load.wait(serverTrpc['post.byId'].queryOptions, { id: '1' }),
+      comments: load.start(serverTrpc['post.comments'].queryOptions, {
+        postId: '1',
+        page: 1,
+      }),
+      feed: load.wait(
+        serverTrpc.feed.infiniteQueryOptions,
+        { limit: 10 },
+        { pages: 2 },
+      ),
+    }))
+    await vi.advanceTimersByTimeAsync(20)
+    const { handles, data } = await loaded
+    expect(data.post).toStrictEqual({ id: '1', title: 'post 1' })
+    const { post, comments, feed } = handles
     const payload = JSON.parse(
       JSON.stringify({
         state: dehydrate(serverClient),
@@ -152,23 +151,23 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
     })
   })
 
-  it('should start procedures together and read their data after', async () => {
+  it('should start a dependent procedure once its parent has data', async () => {
     using _timers = fakeTimers()
     const router = createRouter()
     using queryClient = clearOnDispose(new QueryClient())
     const trpc = createOptionsProxy(router, queryClient)
 
-    const promise = trpc.$loadHandles((q) => {
-      const post = q.wait(trpc['post.byId'].queryOptions, { id: '1' })
+    const promise = trpc.$loadHandles((load) => {
+      const post = load.wait(trpc['post.byId'].queryOptions, { id: '1' })
       return {
         post,
-        comments: q.after(post, (value) =>
-          q.start(trpc['post.comments'].queryOptions, {
+        comments: load.after(post, (value) =>
+          load.start(trpc['post.comments'].queryOptions, {
             postId: value.id,
             page: 1,
           }),
         ),
-        feed: q.wait(trpc.feed.infiniteQueryOptions, { limit: 10 }),
+        feed: load.wait(trpc.feed.infiniteQueryOptions, { limit: 10 }),
       }
     })
 

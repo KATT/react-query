@@ -1,24 +1,17 @@
 import {
-  experimental_ensureQueryHandle,
   experimental_fromHandle,
-  experimental_getQueryHandleData,
   experimental_loadQueryHandles,
-  experimental_queryHandle,
-  experimental_queryHandleAsync,
   infiniteQueryOptions,
   queryOptions,
 } from '..'
 import type {
   QueryClient,
-  experimental_DefinedQueryHandle,
-  experimental_DependentQueryHandleEntry,
   experimental_FromHandleOptions,
-  experimental_InferQueryHandleData,
   experimental_LoadedQueryHandles,
   experimental_QueryHandle,
   experimental_QueryHandleEntry,
   experimental_QueryHandleFactory,
-  experimental_QueryHandlesBuilder,
+  experimental_QueryHandleLoader,
 } from '..'
 
 // A small tRPC-like options proxy that uses only the public handle APIs
@@ -87,14 +80,6 @@ type DecorateInfiniteProcedure<
         TInput,
         TOutput
       >
-      $infiniteQueryHandleAsync: (
-        input: Omit<TInput, 'cursor'>,
-        opts?: { pages?: number },
-      ) => Promise<
-        experimental_DefinedQueryHandle<
-          ProcedureInfiniteQueryOptions<TPath, TInput, TOutput>
-        >
-      >
     }
   : {}
 
@@ -103,19 +88,6 @@ type DecorateProcedure<
   TProcedure extends AnyProcedure,
 > = {
   queryOptions: ProcedureQueryOptions<TPath, TProcedure>
-  $queryHandle: (
-    input: InputOf<TProcedure>,
-  ) => experimental_QueryHandle<ProcedureQueryOptions<TPath, TProcedure>>
-  $queryHandleAsync: (
-    input: InputOf<TProcedure>,
-  ) => Promise<
-    experimental_DefinedQueryHandle<ProcedureQueryOptions<TPath, TProcedure>>
-  >
-  $ensureQueryHandle: (
-    input: InputOf<TProcedure>,
-  ) => Promise<
-    experimental_DefinedQueryHandle<ProcedureQueryOptions<TPath, TProcedure>>
-  >
 } & DecorateInfiniteProcedure<TPath, TProcedure>
 
 type ProcedureFactory<TRouter extends AnyRouter> = {
@@ -139,18 +111,6 @@ type AnyRouterHandle<TRouter extends AnyRouter> = HandleOf<
   ProcedureFactory<TRouter>
 >
 
-type DefinedHandleOf<TFactory> =
-  TFactory extends experimental_QueryHandleFactory
-    ? experimental_DefinedQueryHandle<TFactory>
-    : never
-
-/**
- * Any handle the router's awaited verbs returned.
- */
-type AnyRouterDefinedHandle<TRouter extends AnyRouter> = DefinedHandleOf<
-  ProcedureFactory<TRouter>
->
-
 type FactoryOfHandle<TRouter extends AnyRouter, THandle> = THandle extends {
   queryKey: readonly [
     infer TPath extends keyof TRouter & string,
@@ -167,13 +127,9 @@ type FactoryOfHandle<TRouter extends AnyRouter, THandle> = THandle extends {
   : never
 
 type LoadHandles = <
-  TEntries extends Record<
-    string,
-    | experimental_QueryHandleEntry<any, any>
-    | experimental_DependentQueryHandleEntry<any>
-  >,
+  TEntries extends Record<string, experimental_QueryHandleEntry<any, any, any>>,
 >(
-  start: (q: experimental_QueryHandlesBuilder) => TEntries,
+  callback: (load: experimental_QueryHandleLoader) => TEntries,
 ) => Promise<experimental_LoadedQueryHandles<TEntries>>
 
 export type OptionsProxy<TRouter extends AnyRouter> = {
@@ -193,23 +149,14 @@ export type OptionsProxy<TRouter extends AnyRouter> = {
       : never
     : never
   /**
-   * Reads the data of any handle the router's awaited verbs returned, from the procedure path in
-   * its key.
-   */
-  $getQueryHandleData: <THandle extends AnyRouterDefinedHandle<TRouter>>(
-    handle: THandle,
-  ) => FactoryOfHandle<TRouter, THandle> extends infer TFactory extends
-    experimental_QueryHandleFactory
-    ? experimental_InferQueryHandleData<TFactory>
-    : never
-  /**
-   * Starts queries together on the proxy's client, like `experimental_loadQueryHandles`.
+   * Starts queries on the proxy's client with `experimental_loadQueryHandles`.
    */
   $loadHandles: LoadHandles
 }
 
 /**
- * Creates an options proxy whose procedures start queries and return handles.
+ * Creates an options proxy whose procedures return query factories, and which starts and reads
+ * handles.
  * @param router - The procedures, by path.
  * @param queryClient - The client to start queries on.
  * @returns The proxy.
@@ -230,21 +177,6 @@ export function createOptionsProxy<TRouter extends AnyRouter>(
     return {
       queryOptions: factory,
       infiniteQueryOptions: infiniteFactory,
-      $queryHandle: (input: unknown) =>
-        experimental_queryHandle(queryClient, factory, input),
-      $queryHandleAsync: (input: unknown) =>
-        experimental_queryHandleAsync(queryClient, factory, input),
-      $ensureQueryHandle: (input: unknown) =>
-        experimental_ensureQueryHandle(queryClient, factory, input),
-      $infiniteQueryHandleAsync: (input: object, opts?: { pages?: number }) =>
-        experimental_queryHandleAsync(
-          queryClient,
-          (pageInput: object) => ({
-            ...infiniteFactory(pageInput),
-            pages: opts?.pages,
-          }),
-          input,
-        ),
     }
   }
 
@@ -259,36 +191,15 @@ export function createOptionsProxy<TRouter extends AnyRouter>(
       : experimental_fromHandle(procedure.queryOptions, handle as never)
   }
 
-  const $getQueryHandleData = (handle: {
-    queryKey: readonly [string, { type: 'query' | 'infinite' }]
-    input: any
-  }) => {
-    const [path, { type }] = handle.queryKey
-    const procedure = decorate(path)
-    return type === 'infinite'
-      ? experimental_getQueryHandleData(
-          queryClient,
-          procedure.infiniteQueryOptions,
-          handle as never,
-        )
-      : experimental_getQueryHandleData(
-          queryClient,
-          procedure.queryOptions,
-          handle as never,
-        )
-  }
-
-  const $loadHandles: LoadHandles = (start) =>
-    experimental_loadQueryHandles(queryClient, start)
+  const $loadHandles: LoadHandles = (callback) =>
+    experimental_loadQueryHandles(queryClient, callback)
 
   return new Proxy({} as OptionsProxy<TRouter>, {
     get: (_target, path) =>
       path === '$fromHandle'
         ? $fromHandle
-        : path === '$getQueryHandleData'
-          ? $getQueryHandleData
-          : path === '$loadHandles'
-            ? $loadHandles
-            : decorate(path as string),
+        : path === '$loadHandles'
+          ? $loadHandles
+          : decorate(path as string),
   })
 }

@@ -34,7 +34,7 @@ type QueryHandleInput<TFactory extends QueryHandleFactory> =
  * factory's other parameters are left out, because a handle only carries the input, so
  * `experimental_fromHandle` couldn't pass them on.
  */
-export type QueryHandleArgs<TFactory extends QueryHandleFactory> =
+type QueryHandleArgs<TFactory extends QueryHandleFactory> =
   Parameters<TFactory> extends []
     ? []
     : Parameters<TFactory> extends [infer TInput, ...Array<any>]
@@ -70,12 +70,10 @@ type QueryHandleKey<TFactory extends QueryHandleFactory> = PlainQueryKey<
 >
 
 /**
- * A small serializable reference to a query, from `experimental_queryHandle`,
- * `experimental_queryHandleAsync`, `experimental_ensureQueryHandle` or
- * `experimental_waterfallHandle`. Pass
- * it to the component that reads the query, and rebuild the query's options there with
- * `experimental_fromHandle(factory, handle)`. It carries no data: readers get the query's data
- * from the cache.
+ * A small serializable reference to a query, from `experimental_loadQueryHandles` or
+ * `experimental_waterfallHandle`. Pass it to the component that reads the query, and rebuild the
+ * query's options there with `experimental_fromHandle(factory, handle)`. It carries no data:
+ * readers get the query's data from the cache.
  *
  * Handles of two factories only mix when their keys have the same type. Declare keys with
  * `as const` to keep factories with the same input and data apart.
@@ -91,22 +89,6 @@ export interface QueryHandle<
    * The query's input: the argument its factory takes.
    */
   readonly input: QueryHandleInput<TFactory>
-}
-
-declare const definedQueryHandle: unique symbol
-
-/**
- * A handle from `experimental_queryHandleAsync` or `experimental_ensureQueryHandle`: when it
- * resolved, the cache had the query's data. `experimental_getQueryHandleData` only takes these.
- * The brand exists only in types, so the handle is still a plain `{ queryKey, input }`.
- */
-export interface DefinedQueryHandle<
-  TFactory extends QueryHandleFactory = QueryHandleFactory,
-> extends QueryHandle<TFactory> {
-  /**
-   * Marks a handle whose data was in the cache when it resolved. It exists only in types.
-   */
-  readonly [definedQueryHandle]: true
 }
 
 /**
@@ -138,11 +120,151 @@ export type InferQueryHandleData<
   T extends QueryHandleFactory | QueryHandle<any>,
 > = T extends QueryHandleFactory
   ? FactoryData<ReturnType<T>>
-  : T extends DefinedQueryHandle<infer TFactory>
+  : T extends QueryHandle<infer TFactory>
     ? FactoryData<ReturnType<TFactory>>
-    : T extends QueryHandle<infer TFactory>
-      ? FactoryData<ReturnType<TFactory>>
-      : never
+    : never
+
+type QueryHandleEntryKind = 'start' | 'wait' | 'ensure'
+
+/**
+ * Options for one infinite query that `experimental_loadQueryHandles` starts.
+ */
+export interface QueryHandleLoadOptions {
+  /**
+   * How many pages to fetch when the cache has none, like the `pages` option of
+   * `queryClient.infiniteQuery`. Readers don't get it, so their refetches fetch every page they
+   * have.
+   */
+  pages?: number
+}
+
+/**
+ * The arguments `start`, `wait` and `ensure` take after the factory: its input, if it takes one,
+ * and for an infinite factory, options like `pages`.
+ */
+type QueryHandleLoadArgs<TFactory extends QueryHandleFactory> =
+  ReturnType<TFactory> extends { initialPageParam: unknown }
+    ? Parameters<TFactory> extends []
+      ? [input?: undefined, options?: QueryHandleLoadOptions]
+      : [...QueryHandleArgs<TFactory>, options?: QueryHandleLoadOptions]
+    : QueryHandleArgs<TFactory>
+
+declare const entryFactory: unique symbol
+declare const entryKind: unique symbol
+declare const entryNull: unique symbol
+
+/**
+ * A query that `experimental_loadQueryHandles` started. It is opaque: its handle and data come
+ * back when `experimental_loadQueryHandles` resolves.
+ */
+export interface QueryHandleEntry<
+  TFactory extends QueryHandleFactory = QueryHandleFactory,
+  TKind extends QueryHandleEntryKind = QueryHandleEntryKind,
+  TNull extends null = never,
+> {
+  /**
+   * The factory that started the query. It exists only in types.
+   */
+  readonly [entryFactory]: TFactory
+  /**
+   * Whether the load waits for the query, and for which data. It exists only in types.
+   */
+  readonly [entryKind]: TKind
+  /**
+   * `null` when an `after` callback can start nothing. It exists only in types.
+   */
+  readonly [entryNull]: TNull
+}
+
+type AnyQueryHandleEntry = QueryHandleEntry<any, any, any>
+
+type WaitedQueryHandleEntry = QueryHandleEntry<any, 'wait' | 'ensure', any>
+
+type EntryHandle<TEntry> =
+  TEntry extends QueryHandleEntry<infer TFactory, any, infer TNull>
+    ? QueryHandle<TFactory> | TNull
+    : never
+
+type EntryData<TEntry> =
+  TEntry extends QueryHandleEntry<
+    infer TFactory,
+    'wait' | 'ensure',
+    infer TNull
+  >
+    ? InferQueryHandleData<TFactory> | TNull
+    : never
+
+type DependentEntry<TResult> = [Extract<TResult, AnyQueryHandleEntry>] extends [
+  QueryHandleEntry<infer TFactory, infer TKind, infer TNull>,
+]
+  ? QueryHandleEntry<
+      TFactory,
+      TKind,
+      TNull | (null extends TResult ? null : never)
+    >
+  : never
+
+/**
+ * What `experimental_loadQueryHandles` resolves to.
+ */
+export interface LoadedQueryHandles<
+  TEntries extends Record<string, AnyQueryHandleEntry>,
+> {
+  /**
+   * A handle for every entry, by the keys the callback returned. Return them from a loader.
+   */
+  handles: { [TKey in keyof TEntries]: EntryHandle<TEntries[TKey]> }
+  /**
+   * The data of every entry the load waited for, like `useSuspenseQuery`'s `data`.
+   */
+  data: {
+    [
+      TKey in keyof TEntries as TEntries[TKey] extends WaitedQueryHandleEntry
+        ? TKey
+        : never
+    ]: EntryData<TEntries[TKey]>
+  }
+}
+
+/**
+ * Starts the queries of one `experimental_loadQueryHandles` call. It works only while a callback
+ * of that call runs.
+ */
+export interface QueryHandleLoader {
+  /**
+   * Starts a query without waiting for it. Its errors show up where a component reads it.
+   */
+  start: <TFactory extends QueryHandleFactory>(
+    factory: TFactory,
+    ...args: QueryHandleLoadArgs<TFactory>
+  ) => QueryHandleEntry<TFactory, 'start'>
+  /**
+   * Starts a query and waits for fresh data, like `queryClient.query`.
+   */
+  wait: <TFactory extends QueryHandleFactory>(
+    factory: TFactory,
+    ...args: QueryHandleLoadArgs<TFactory>
+  ) => QueryHandleEntry<TFactory, 'wait'>
+  /**
+   * Starts a query and waits for any data, even stale data, like `queryClient.query` with
+   * `staleTime: 'static'`. If the cache has data, it doesn't fetch.
+   */
+  ensure: <TFactory extends QueryHandleFactory>(
+    factory: TFactory,
+    ...args: QueryHandleLoadArgs<TFactory>
+  ) => QueryHandleEntry<TFactory, 'ensure'>
+  /**
+   * Starts a query that needs another query's data, as soon as that data is in the cache. Other
+   * queries don't wait for it. Return `null` to start nothing.
+   */
+  after: <
+    TParent extends WaitedQueryHandleEntry,
+    TResult extends AnyQueryHandleEntry | null,
+  >(
+    parent: TParent,
+    start: (data: EntryData<TParent>) => TResult,
+  ) => DependentEntry<TResult>
+}
 
 // FUNCTIONS
 
@@ -180,89 +302,178 @@ function toHandle(options: QueryFactoryOptions, input: unknown) {
   return { queryKey: options.queryKey, input }
 }
 
+interface SettledEntry {
+  handle: QueryHandle | null
+  hasData: boolean
+  data?: unknown
+}
+
+interface EntryState {
+  promise: Promise<SettledEntry>
+  waited: boolean
+}
+
 /**
- * Starts a query without waiting and returns a serializable handle for it. A route loader, server
- * component or server render passes the handle to the component that reads the query. Like
- * `queryClient.query`, it fetches only if the cache has no fresh data. It never rejects, even when
- * the `queryFn` fails at once: fetch errors show up where a component reads the handle.
- * @param queryClient - The client to start the query on.
- * @param factory - The query factory, a function of the query's input that returns its options.
- * @param input - The input to pass to the factory, if it takes one.
- * @returns A handle with the query's key and input.
- * @example
- * ```ts
- * const postQuery = (input: { id: string }) =>
- *   queryOptions({
- *     queryKey: ['post', input.id] as const,
- *     queryFn: () => fetchPost(input.id),
- *   })
+ * Tells promises apart from entries.
+ * @param value - What a callback returned.
+ * @returns Whether it has a `then` method.
+ */
+function isThenable(value: unknown): boolean {
+  return typeof (value as PromiseLike<unknown> | null)?.then === 'function'
+}
+
+/**
+ * Starts a loader's queries together, waits for the ones it needs, and returns serializable
+ * handles for all of them. A route loader, Server Component or server render passes the handles
+ * to the components that read the queries.
  *
- * // in a route loader
- * const post = experimental_queryHandle(queryClient, postQuery, { id })
- * ```
- */
-export function experimental_queryHandle<TFactory extends QueryHandleFactory>(
-  queryClient: QueryClient,
-  factory: TFactory,
-  ...input: QueryHandleArgs<TFactory>
-): QueryHandle<TFactory> {
-  const options = factory(...input)
-  void startQueryFromFactory(queryClient, options).catch(noop)
-  return toHandle(options, input[0]) as QueryHandle<TFactory>
-}
-
-/**
- * Starts a query and waits for it like `queryClient.query`, then returns a serializable handle for
- * it. It uses cached data only if it isn't stale. Rejects if the fetch fails, so a loader can
- * redirect or show an error page. The handle carries no data; read it with `useSuspenseQuery` to
- * get defined data.
- * @param queryClient - The client to start the query on.
- * @param factory - The query factory, a function of the query's input that returns its options.
- * @param input - The input to pass to the factory, if it takes one.
- * @returns A promise of a handle with the query's key and input.
+ * The callback starts every query before anything waits. It can't be async, and `load` throws
+ * once it returns, so no query waits for another unless `load.after` says it needs that query's
+ * data. Rejects as soon as a query it waits for fails or a callback throws, so a loader can
+ * redirect or show an error page.
+ * @param queryClient - The client to start the queries on.
+ * @param callback - Starts the queries with `load` and returns them by name.
+ * @returns A promise of the handles, and of the data of the queries it waited for.
  * @example
  * ```ts
  * // in a route loader
- * const post = await experimental_queryHandleAsync(queryClient, postQuery, { id })
+ * const { handles, data } = await experimental_loadQueryHandles(queryClient, (load) => ({
+ *   viewer: load.start(viewerQuery),
+ *   post: load.wait(postQuery, { id: params.id }),
+ * }))
+ * if (!data.post) throw notFound()
+ * return handles
  * ```
  */
-export async function experimental_queryHandleAsync<
-  TFactory extends QueryHandleFactory,
+export async function experimental_loadQueryHandles<
+  TEntries extends Record<string, AnyQueryHandleEntry>,
 >(
   queryClient: QueryClient,
-  factory: TFactory,
-  ...input: QueryHandleArgs<TFactory>
-): Promise<DefinedQueryHandle<TFactory>> {
-  const options = factory(...input)
-  await startQueryFromFactory(queryClient, options)
-  return toHandle(options, input[0]) as DefinedQueryHandle<TFactory>
-}
+  callback: (load: QueryHandleLoader) => TEntries,
+): Promise<LoadedQueryHandles<TEntries>> {
+  const states = new WeakMap<object, EntryState>()
+  const waiting: Array<Promise<SettledEntry>> = []
+  let open = false
 
-/**
- * Waits for any data, even stale data, then returns a serializable handle for the query. If the
- * cache has data, it resolves at once without fetching. If not, it fetches once and waits, and
- * rejects if that fetch fails. Readers use the factory's `staleTime`, so a reader refetches stale
- * data in the background when it mounts.
- * @param queryClient - The client to start the query on.
- * @param factory - The query factory, a function of the query's input that returns its options.
- * @param input - The input to pass to the factory, if it takes one.
- * @returns A promise of a handle with the query's key and input.
- * @example
- * ```ts
- * // in a route loader: use any cached post, and wait only if there is none
- * const post = await experimental_ensureQueryHandle(queryClient, postQuery, { id })
- * ```
- */
-export async function experimental_ensureQueryHandle<
-  TFactory extends QueryHandleFactory,
->(
-  queryClient: QueryClient,
-  factory: TFactory,
-  ...input: QueryHandleArgs<TFactory>
-): Promise<DefinedQueryHandle<TFactory>> {
-  const options = factory(...input)
-  await startQueryFromFactory(queryClient, { ...options, staleTime: 'static' })
-  return toHandle(options, input[0]) as DefinedQueryHandle<TFactory>
+  const run = <TResult>(start: () => TResult): TResult => {
+    open = true
+    try {
+      const result = start()
+      if (isThenable(result)) {
+        throw new Error(
+          'experimental_loadQueryHandles: start queries synchronously. A callback must return entries, not a promise.',
+        )
+      }
+      return result
+    } finally {
+      open = false
+    }
+  }
+
+  const addEntry = (promise: Promise<SettledEntry>, waited: boolean) => {
+    promise.catch(noop)
+    if (waited) waiting.push(promise)
+    const entry = {}
+    states.set(entry, { promise, waited })
+    return entry as never
+  }
+
+  const startEntry =
+    (kind: QueryHandleEntryKind) =>
+    (
+      factory: QueryHandleFactory,
+      input?: unknown,
+      loadOptions?: QueryHandleLoadOptions,
+    ) => {
+      if (!open) {
+        throw new Error(
+          'experimental_loadQueryHandles: start queries only while its callback runs, before anything waits.',
+        )
+      }
+      const options = factory(input)
+      const handle = toHandle(options, input) as QueryHandle
+      const promise = startQueryFromFactory(queryClient, {
+        ...options,
+        ...(loadOptions?.pages !== undefined && { pages: loadOptions.pages }),
+        ...(kind === 'ensure' && { staleTime: 'static' as const }),
+      })
+      if (kind === 'start') {
+        void promise.catch(noop)
+        return addEntry(Promise.resolve({ handle, hasData: false }), false)
+      }
+      return addEntry(
+        promise.then(() => {
+          const { queryHash } = queryClient.defaultQueryOptions(options)
+          const data = queryClient.getQueryCache().get(queryHash)?.state.data
+          return {
+            handle,
+            hasData: true,
+            data: options.select ? options.select(data) : data,
+          }
+        }),
+        true,
+      )
+    }
+
+  const load: QueryHandleLoader = {
+    start: startEntry('start') as QueryHandleLoader['start'],
+    wait: startEntry('wait') as QueryHandleLoader['wait'],
+    ensure: startEntry('ensure') as QueryHandleLoader['ensure'],
+    after: (parent, start) => {
+      if (!open) {
+        throw new Error(
+          'experimental_loadQueryHandles: start queries only while its callback runs, before anything waits.',
+        )
+      }
+      const parentState = states.get(parent)
+      if (!parentState?.waited) {
+        throw new Error(
+          'experimental_loadQueryHandles: `load.after` takes a query from `load.wait`, `load.ensure` or `load.after` of the same call.',
+        )
+      }
+      return addEntry(
+        parentState.promise.then((settled) => {
+          const entry = run(() => start(settled.data as never))
+          if (entry === null) return { handle: null, hasData: true, data: null }
+          const state = states.get(entry)
+          if (!state) {
+            throw new Error(
+              'experimental_loadQueryHandles: a `load.after` callback must return a query of the same call, or null.',
+            )
+          }
+          return state.promise
+        }),
+        true,
+      )
+    },
+  }
+
+  const entries = Object.entries(run(() => callback(load))).map(
+    ([key, entry]) => {
+      const state = states.get(entry)
+      if (!state) {
+        throw new Error(
+          `experimental_loadQueryHandles: "${key}" is not a query of this call.`,
+        )
+      }
+      return [key, state] as const
+    },
+  )
+
+  // `load.after` adds queries while others settle, so wait until no new ones appear
+  for (let count = -1; count !== waiting.length;) {
+    count = waiting.length
+    await Promise.all(waiting)
+  }
+
+  const handles: Record<string, unknown> = {}
+  const data: Record<string, unknown> = {}
+  for (const [key, state] of entries) {
+    const settled = await state.promise
+    handles[key] = settled.handle
+    if (settled.hasData) data[key] = settled.data
+  }
+  return { handles, data } as LoadedQueryHandles<TEntries>
 }
 
 /**
@@ -369,37 +580,4 @@ export function experimental_fromHandle<TFactory extends QueryHandleFactory>(
   handle: QueryHandle<NoInfer<TFactory>>,
 ): FromHandleOptions<TFactory> {
   return factory(handle.input) as FromHandleOptions<TFactory>
-}
-
-/**
- * Reads the data of an awaited handle from the cache, for a loader that decides what to do with
- * it, like throwing `notFound()`. It takes only handles from `experimental_queryHandleAsync` and
- * `experimental_ensureQueryHandle`, so it can't read a query that was only started. It never
- * fetches, waits or creates a query. It returns what the factory's `select` returns, or else the
- * `queryFn`'s data, like `useSuspenseQuery`'s `data`.
- * @param queryClient - The client that has the query's data.
- * @param factory - The function of the query's input that the handle came from.
- * @param handle - A handle from `experimental_queryHandleAsync` or `experimental_ensureQueryHandle`.
- * @returns The data a reader of the handle gets from the cache.
- * @example
- * ```ts
- * // in a route loader
- * const post = await experimental_queryHandleAsync(queryClient, postQuery, { id })
- * if (!experimental_getQueryHandleData(queryClient, postQuery, post)) throw notFound()
- * return { post }
- * ```
- */
-export function experimental_getQueryHandleData<
-  TFactory extends QueryHandleFactory,
->(
-  queryClient: QueryClient,
-  factory: TFactory,
-  handle: DefinedQueryHandle<NoInfer<TFactory>>,
-): InferQueryHandleData<TFactory> {
-  const options = factory(handle.input)
-  const { queryHash } = queryClient.defaultQueryOptions(options)
-  const data = queryClient.getQueryCache().get(queryHash)?.state.data
-  return (
-    options.select ? options.select(data) : data
-  ) as InferQueryHandleData<TFactory>
 }
