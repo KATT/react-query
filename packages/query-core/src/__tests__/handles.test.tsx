@@ -194,15 +194,15 @@ describe('query handles', () => {
           initialPageParam: 1,
           getNextPageParam: (lastPage: number) => lastPage + 1,
         })
-        const pagelessQuery = (input: { size: number }) => ({
-          queryKey: [...key, 'pageless', input.size],
+        const noNextPageQuery = (input: { size: number }) => ({
+          queryKey: [...key, 'no-next-page', input.size],
           queryFn: ({ pageParam }: { pageParam: number }) => pageParam * 10,
           initialPageParam: 1,
         })
 
         await experimental_loadQueryHandles(queryClient, (load) => ({
           feed: load.start(feedQuery, { size: 1 }),
-          pageless: load.start(pagelessQuery, { size: 1 }),
+          noNextPage: load.start(noNextPageQuery, { size: 1 }),
         }))
         await vi.advanceTimersByTimeAsync(0)
 
@@ -210,9 +210,9 @@ describe('query handles', () => {
           pages: [10],
           pageParams: [1],
         })
-        expect(queryClient.getQueryData([...key, 'pageless', 1])).toStrictEqual(
-          { pages: [10], pageParams: [1] },
-        )
+        expect(
+          queryClient.getQueryData([...key, 'no-next-page', 1]),
+        ).toStrictEqual({ pages: [10], pageParams: [1] })
       })
     })
 

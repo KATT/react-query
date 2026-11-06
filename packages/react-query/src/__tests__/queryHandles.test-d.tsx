@@ -86,9 +86,9 @@ describe('query handles', () => {
     })
 
     it('should take pages only for an infinite factory', () => {
-      const feedlessQuery = () =>
+      const allPostsFeedQuery = () =>
         infiniteQueryOptions({
-          queryKey: ['feedless'] as const,
+          queryKey: ['all-posts-feed'] as const,
           queryFn: ({ pageParam }) => Promise.resolve([pageParam]),
           initialPageParam: 0,
           getNextPageParam: (lastPage) => lastPage[0],
@@ -97,7 +97,7 @@ describe('query handles', () => {
       assertType(
         experimental_loadQueryHandles(queryClient, (load) => ({
           feed: load.wait(feedQuery, { size: 1 }, { pages: 2 }),
-          feedless: load.ensure(feedlessQuery, undefined, { pages: 2 }),
+          allPosts: load.ensure(allPostsFeedQuery, undefined, { pages: 2 }),
           started: load.start(feedQuery, { size: 1 }),
           // @ts-expect-error a query has no pages
           post: load.wait(postQuery, { id: '1' }, { pages: 2 }),
@@ -279,12 +279,20 @@ describe('query handles', () => {
       )
       const waterfall = experimental_waterfallHandle(postQuery, { id: '1' })
 
-      for (const handle of [...Object.values(handles), waterfall]) {
-        expectTypeOf(
-          useQuery(experimental_fromHandle(postQuery, handle)).data,
-        ).toEqualTypeOf<Post | undefined>()
-      }
+      expectTypeOf(
+        useQuery(experimental_fromHandle(postQuery, handles.started)).data,
+      ).toEqualTypeOf<Post | undefined>()
+      expectTypeOf(
+        useQuery(experimental_fromHandle(postQuery, handles.waited)).data,
+      ).toEqualTypeOf<Post | undefined>()
+      expectTypeOf(
+        useQuery(experimental_fromHandle(postQuery, handles.ensured)).data,
+      ).toEqualTypeOf<Post | undefined>()
+      expectTypeOf(
+        useQuery(experimental_fromHandle(postQuery, waterfall)).data,
+      ).toEqualTypeOf<Post | undefined>()
     })
+
     it('should type useSuspenseQuery data as defined for every handle', async () => {
       const { handles } = await experimental_loadQueryHandles(
         queryClient,
@@ -296,13 +304,24 @@ describe('query handles', () => {
       )
       const waterfall = experimental_waterfallHandle(postQuery, { id: '1' })
 
-      for (const handle of [...Object.values(handles), waterfall]) {
-        expectTypeOf(
-          useSuspenseQuery(experimental_fromHandle(postQuery, handle)).data,
-        ).toEqualTypeOf<Post>()
-      }
+      expectTypeOf(
+        useSuspenseQuery(experimental_fromHandle(postQuery, handles.started))
+          .data,
+      ).toEqualTypeOf<Post>()
+      expectTypeOf(
+        useSuspenseQuery(experimental_fromHandle(postQuery, handles.waited))
+          .data,
+      ).toEqualTypeOf<Post>()
+      expectTypeOf(
+        useSuspenseQuery(experimental_fromHandle(postQuery, handles.ensured))
+          .data,
+      ).toEqualTypeOf<Post>()
+      expectTypeOf(
+        useSuspenseQuery(experimental_fromHandle(postQuery, waterfall)).data,
+      ).toEqualTypeOf<Post>()
     })
-    it('should keep useQuery data possibly undefined when read-site options are spread', async () => {
+
+    it('should keep useQuery data possibly undefined when read-site options are spread', () => {
       const handle = experimental_waterfallHandle(postQuery, {
         id: '1',
       })
@@ -340,7 +359,7 @@ describe('query handles', () => {
       expectTypeOf(data).toEqualTypeOf<InfiniteData<Array<number>, unknown>>()
     })
 
-    it('should type infinite data as possibly undefined for useInfiniteQuery and defined for useSuspenseInfiniteQuery', async () => {
+    it('should type infinite data as possibly undefined for useInfiniteQuery and defined for useSuspenseInfiniteQuery', () => {
       const handle = experimental_waterfallHandle(feedQuery, { size: 1 })
 
       expectTypeOf(
@@ -529,7 +548,7 @@ describe('query handles', () => {
       expectTypeOf(suspense.data).toEqualTypeOf<Array<number>>()
     })
 
-    it("should type data from a factory's select", async () => {
+    it("should type data from a factory's select", () => {
       const started = experimental_waterfallHandle(postTitleQuery, {
         id: '1',
       })
@@ -550,7 +569,7 @@ describe('query handles', () => {
       ).toEqualTypeOf<string>()
     })
 
-    it("should keep a selecting factory's cache data as the queryFn's data", async () => {
+    it("should keep a selecting factory's cache data as the queryFn's data", () => {
       const handle = experimental_waterfallHandle(postTitleQuery, { id: '1' })
 
       expectTypeOf(handle).toEqualTypeOf<
@@ -673,7 +692,7 @@ describe('query handles', () => {
       )
     })
 
-    it('should take a handle type', async () => {
+    it('should take a handle type', () => {
       const awaited = experimental_waterfallHandle(postTitleQuery, { id: '1' })
 
       expectTypeOf<

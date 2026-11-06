@@ -131,7 +131,7 @@ type QueryHandleEntryKind = 'start' | 'wait' | 'ensure'
  */
 export interface QueryHandleLoadOptions {
   /**
-   * How many pages to fetch when the cache has none, like the `pages` option of
+   * The number of pages the load fetches, starting from the first, like the `pages` option of
    * `queryClient.infiniteQuery`. Readers don't get it, so their refetches fetch every page they
    * have.
    */
