@@ -2,6 +2,7 @@ import {
   experimental_ensureQueryHandle,
   experimental_fromHandle,
   experimental_getQueryHandleData,
+  experimental_loadQueryHandles,
   experimental_queryHandle,
   experimental_queryHandleAsync,
   infiniteQueryOptions,
@@ -10,10 +11,14 @@ import {
 import type {
   QueryClient,
   experimental_DefinedQueryHandle,
+  experimental_DependentQueryHandleEntry,
   experimental_FromHandleOptions,
   experimental_InferQueryHandleData,
+  experimental_LoadedQueryHandles,
   experimental_QueryHandle,
+  experimental_QueryHandleEntry,
   experimental_QueryHandleFactory,
+  experimental_QueryHandlesBuilder,
 } from '..'
 
 // A small tRPC-like options proxy that uses only the public handle APIs
@@ -161,6 +166,16 @@ type FactoryOfHandle<TRouter extends AnyRouter, THandle> = THandle extends {
     : ProcedureQueryOptions<TPath, TRouter[TPath]>
   : never
 
+type LoadHandles = <
+  TEntries extends Record<
+    string,
+    | experimental_QueryHandleEntry<any, any>
+    | experimental_DependentQueryHandleEntry<any>
+  >,
+>(
+  start: (q: experimental_QueryHandlesBuilder) => TEntries,
+) => Promise<experimental_LoadedQueryHandles<TEntries>>
+
 export type OptionsProxy<TRouter extends AnyRouter> = {
   [TPath in keyof TRouter & string]: DecorateProcedure<TPath, TRouter[TPath]>
 } & {
@@ -187,6 +202,10 @@ export type OptionsProxy<TRouter extends AnyRouter> = {
     experimental_QueryHandleFactory
     ? experimental_InferQueryHandleData<TFactory>
     : never
+  /**
+   * Starts queries together on the proxy's client, like `experimental_loadQueryHandles`.
+   */
+  $loadHandles: LoadHandles
 }
 
 /**
@@ -259,12 +278,17 @@ export function createOptionsProxy<TRouter extends AnyRouter>(
         )
   }
 
+  const $loadHandles: LoadHandles = (start) =>
+    experimental_loadQueryHandles(queryClient, start)
+
   return new Proxy({} as OptionsProxy<TRouter>, {
     get: (_target, path) =>
       path === '$fromHandle'
         ? $fromHandle
         : path === '$getQueryHandleData'
           ? $getQueryHandleData
-          : decorate(path as string),
+          : path === '$loadHandles'
+            ? $loadHandles
+            : decorate(path as string),
   })
 }

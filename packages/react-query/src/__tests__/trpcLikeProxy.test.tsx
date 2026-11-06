@@ -151,4 +151,44 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
       page: 2,
     })
   })
+
+  it('should start procedures together and read their data after', async () => {
+    using _timers = fakeTimers()
+    const router = createRouter()
+    using queryClient = clearOnDispose(new QueryClient())
+    const trpc = createOptionsProxy(router, queryClient)
+
+    const promise = trpc.$loadHandles((q) => {
+      const post = q.wait(trpc['post.byId'].queryOptions, { id: '1' })
+      return {
+        post,
+        comments: q.after(post, (value) =>
+          q.start(trpc['post.comments'].queryOptions, {
+            postId: value.id,
+            page: 1,
+          }),
+        ),
+        feed: q.wait(trpc.feed.infiniteQueryOptions, { limit: 10 }),
+      }
+    })
+
+    expect(router['post.byId']).toHaveBeenCalledTimes(1)
+    expect(router.feed).toHaveBeenCalledTimes(1)
+    expect(router['post.comments']).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(10)
+    const { handles, data } = await promise
+
+    expect(router['post.comments']).toHaveBeenCalledWith({
+      postId: '1',
+      page: 1,
+    })
+    expect(data.post).toStrictEqual({ id: '1', title: 'post 1' })
+    expect(data.feed.pages).toStrictEqual([
+      { items: ['item 0'], nextCursor: 10 },
+    ])
+    expect(trpc.$fromHandle(handles.comments).queryKey).toStrictEqual(
+      trpc['post.comments'].queryOptions({ postId: '1', page: 1 }).queryKey,
+    )
+    await vi.advanceTimersByTimeAsync(10)
+  })
 })
