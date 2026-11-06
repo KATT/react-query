@@ -48,14 +48,14 @@ describe('query handles', () => {
     it("should take the factory's input", () => {
       assertType(
         experimental_loadQueryHandles(queryClient, (load) => ({
-          post: load.start(postQuery, { id: '1' }),
-          viewer: load.wait(viewerQuery),
+          post: load.prefetch(postQuery, { id: '1' }),
+          viewer: load.fetch(viewerQuery),
           // @ts-expect-error the input is required
-          missing: load.start(postQuery),
+          missing: load.prefetch(postQuery),
           // @ts-expect-error the input has the wrong shape
-          wrong: load.wait(postQuery, { id: 1 }),
+          wrong: load.fetch(postQuery, { id: 1 }),
           // @ts-expect-error the factory takes no input
-          extra: load.start(viewerQuery, { id: '1' }),
+          extra: load.prefetch(viewerQuery, { id: '1' }),
           // @ts-expect-error the input has the wrong shape
           ensured: load.ensure(postQuery, { id: 1 }),
         })),
@@ -75,9 +75,9 @@ describe('query handles', () => {
 
       assertType(
         experimental_loadQueryHandles(queryClient, (load) => ({
-          post: load.start(optionsQuery, { id: '1' }),
+          post: load.prefetch(optionsQuery, { id: '1' }),
           // @ts-expect-error the handle only carries the input
-          waited: load.wait(optionsQuery, { id: '1' }, { staleTime: 60_000 }),
+          fetched: load.fetch(optionsQuery, { id: '1' }, { staleTime: 60_000 }),
         })),
       )
       const opts = { staleTime: 60_000 }
@@ -96,11 +96,11 @@ describe('query handles', () => {
 
       assertType(
         experimental_loadQueryHandles(queryClient, (load) => ({
-          feed: load.wait(feedQuery, { size: 1 }, { pages: 2 }),
+          feed: load.fetch(feedQuery, { size: 1 }, { pages: 2 }),
           allPosts: load.ensure(allPostsFeedQuery, undefined, { pages: 2 }),
-          started: load.start(feedQuery, { size: 1 }),
+          prefetched: load.prefetch(feedQuery, { size: 1 }),
           // @ts-expect-error a query has no pages
-          post: load.wait(postQuery, { id: '1' }, { pages: 2 }),
+          post: load.fetch(postQuery, { id: '1' }, { pages: 2 }),
         })),
       )
     })
@@ -115,8 +115,8 @@ describe('query handles', () => {
       const { handles } = await experimental_loadQueryHandles(
         queryClient,
         (load) => ({
-          first: load.start(listQuery),
-          second: load.start(listQuery, { page: 2 }),
+          first: load.prefetch(listQuery),
+          second: load.prefetch(listQuery, { page: 2 }),
         }),
       )
 
@@ -140,7 +140,7 @@ describe('query handles', () => {
 
       const { handles } = await experimental_loadQueryHandles(
         queryClient,
-        (load) => ({ page: load.start(pageQuery, { id: '1' }) }),
+        (load) => ({ page: load.prefetch(pageQuery, { id: '1' }) }),
       )
 
       expectTypeOf(handles.page.queryKey).toEqualTypeOf<
@@ -148,12 +148,12 @@ describe('query handles', () => {
       >()
     })
 
-    it('should type a plain handle per query and data per waited query', async () => {
+    it('should type a plain handle per query and data per fetched or ensured query', async () => {
       const { handles, data } = await experimental_loadQueryHandles(
         queryClient,
         (load) => ({
-          viewer: load.start(viewerQuery),
-          post: load.wait(postQuery, { id: '1' }),
+          viewer: load.prefetch(viewerQuery),
+          post: load.fetch(postQuery, { id: '1' }),
           feed: load.ensure(feedQuery, { size: 10 }),
         }),
       )
@@ -174,7 +174,7 @@ describe('query handles', () => {
         post: Post
         feed: InfiniteData<Array<number>, unknown>
       }>()
-      // @ts-expect-error a started query has no data
+      // @ts-expect-error a prefetched query has no data
       assertType(data.viewer)
     })
 
@@ -189,7 +189,7 @@ describe('query handles', () => {
 
       const { handles, data } = await experimental_loadQueryHandles(
         queryClient,
-        (load) => ({ title: load.wait(postTitleQuery, { id: '1' }) }),
+        (load) => ({ title: load.fetch(postTitleQuery, { id: '1' }) }),
       )
 
       expectTypeOf(data.title).toEqualTypeOf<string>()
@@ -200,7 +200,7 @@ describe('query handles', () => {
 
     it('should not take a callback that returns a promise, or values that are not queries', () => {
       const asyncCallback = (load: experimental_QueryHandleLoader) =>
-        Promise.resolve({ post: load.wait(postQuery, { id: '1' }) })
+        Promise.resolve({ post: load.fetch(postQuery, { id: '1' }) })
 
       // @ts-expect-error the callback can't return a promise
       assertType(experimental_loadQueryHandles(queryClient, asyncCallback))
@@ -228,16 +228,16 @@ describe('query handles', () => {
       const { handles, data } = await experimental_loadQueryHandles(
         queryClient,
         (load) => {
-          const post = load.wait(authoredPostQuery, { id: '1' })
+          const post = load.fetch(authoredPostQuery, { id: '1' })
           return {
             post,
             morePosts: load.after(post, (value) => {
               expectTypeOf(value).toEqualTypeOf<AuthoredPost | null>()
               return value?.authorId
-                ? load.wait(authorPostsQuery, { authorId: value.authorId })
+                ? load.fetch(authorPostsQuery, { authorId: value.authorId })
                 : null
             }),
-            viewer: load.after(post, () => load.start(viewerQuery)),
+            viewer: load.after(post, () => load.prefetch(viewerQuery)),
           }
         },
       )
@@ -254,13 +254,15 @@ describe('query handles', () => {
       expectTypeOf(data).not.toHaveProperty('viewer')
     })
 
-    it('should only take a waited query as a parent', () => {
+    it('should only take a fetched or ensured query as a parent', () => {
       assertType(
         experimental_loadQueryHandles(queryClient, (load) => {
-          const viewer = load.start(viewerQuery)
+          const viewer = load.prefetch(viewerQuery)
           return {
-            // @ts-expect-error a started query has no data to wait for
-            post: load.after(viewer, () => load.start(postQuery, { id: '1' })),
+            // @ts-expect-error a prefetched query has no data to wait for
+            post: load.after(viewer, () =>
+              load.prefetch(postQuery, { id: '1' }),
+            ),
           }
         }),
       )
@@ -272,18 +274,18 @@ describe('query handles', () => {
       const { handles } = await experimental_loadQueryHandles(
         queryClient,
         (load) => ({
-          started: load.start(postQuery, { id: '1' }),
-          waited: load.wait(postQuery, { id: '1' }),
+          prefetched: load.prefetch(postQuery, { id: '1' }),
+          fetched: load.fetch(postQuery, { id: '1' }),
           ensured: load.ensure(postQuery, { id: '1' }),
         }),
       )
       const waterfall = experimental_waterfallHandle(postQuery, { id: '1' })
 
       expectTypeOf(
-        useQuery(experimental_fromHandle(postQuery, handles.started)).data,
+        useQuery(experimental_fromHandle(postQuery, handles.prefetched)).data,
       ).toEqualTypeOf<Post | undefined>()
       expectTypeOf(
-        useQuery(experimental_fromHandle(postQuery, handles.waited)).data,
+        useQuery(experimental_fromHandle(postQuery, handles.fetched)).data,
       ).toEqualTypeOf<Post | undefined>()
       expectTypeOf(
         useQuery(experimental_fromHandle(postQuery, handles.ensured)).data,
@@ -297,19 +299,19 @@ describe('query handles', () => {
       const { handles } = await experimental_loadQueryHandles(
         queryClient,
         (load) => ({
-          started: load.start(postQuery, { id: '1' }),
-          waited: load.wait(postQuery, { id: '1' }),
+          prefetched: load.prefetch(postQuery, { id: '1' }),
+          fetched: load.fetch(postQuery, { id: '1' }),
           ensured: load.ensure(postQuery, { id: '1' }),
         }),
       )
       const waterfall = experimental_waterfallHandle(postQuery, { id: '1' })
 
       expectTypeOf(
-        useSuspenseQuery(experimental_fromHandle(postQuery, handles.started))
+        useSuspenseQuery(experimental_fromHandle(postQuery, handles.prefetched))
           .data,
       ).toEqualTypeOf<Post>()
       expectTypeOf(
-        useSuspenseQuery(experimental_fromHandle(postQuery, handles.waited))
+        useSuspenseQuery(experimental_fromHandle(postQuery, handles.fetched))
           .data,
       ).toEqualTypeOf<Post>()
       expectTypeOf(
@@ -549,23 +551,13 @@ describe('query handles', () => {
     })
 
     it("should type data from a factory's select", () => {
-      const started = experimental_waterfallHandle(postTitleQuery, {
-        id: '1',
-      })
-      const awaited = experimental_waterfallHandle(postTitleQuery, { id: '1' })
-      const waterfall = experimental_waterfallHandle(postTitleQuery, {
-        id: '1',
-      })
+      const handle = experimental_waterfallHandle(postTitleQuery, { id: '1' })
 
       expectTypeOf(
-        useQuery(experimental_fromHandle(postTitleQuery, started)).data,
+        useQuery(experimental_fromHandle(postTitleQuery, handle)).data,
       ).toEqualTypeOf<string | undefined>()
       expectTypeOf(
-        useSuspenseQuery(experimental_fromHandle(postTitleQuery, awaited)).data,
-      ).toEqualTypeOf<string>()
-      expectTypeOf(
-        useSuspenseQuery(experimental_fromHandle(postTitleQuery, waterfall))
-          .data,
+        useSuspenseQuery(experimental_fromHandle(postTitleQuery, handle)).data,
       ).toEqualTypeOf<string>()
     })
 
@@ -693,13 +685,13 @@ describe('query handles', () => {
     })
 
     it('should take a handle type', () => {
-      const awaited = experimental_waterfallHandle(postTitleQuery, { id: '1' })
+      const title = experimental_waterfallHandle(postTitleQuery, { id: '1' })
 
       expectTypeOf<
         experimental_InferQueryHandleData<typeof handle>
       >().toEqualTypeOf<Post>()
       expectTypeOf<
-        experimental_InferQueryHandleData<typeof awaited>
+        experimental_InferQueryHandleData<typeof title>
       >().toEqualTypeOf<string>()
     })
 

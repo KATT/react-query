@@ -61,12 +61,12 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
     using serverClient = clearOnDispose(new QueryClient())
     const serverTrpc = createOptionsProxy(router, serverClient)
     const loaded = serverTrpc.$loadHandles((load) => ({
-      post: load.wait(serverTrpc['post.byId'].queryOptions, { id: '1' }),
-      comments: load.start(serverTrpc['post.comments'].queryOptions, {
+      post: load.fetch(serverTrpc['post.byId'].queryOptions, { id: '1' }),
+      comments: load.prefetch(serverTrpc['post.comments'].queryOptions, {
         postId: '1',
         page: 1,
       }),
-      feed: load.wait(
+      feed: load.fetch(
         serverTrpc.feed.infiniteQueryOptions,
         { limit: 10 },
         { pages: 2 },
@@ -169,15 +169,15 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
     const trpc = createOptionsProxy(router, queryClient)
 
     const promise = trpc.$loadHandles((load) => {
-      const post = load.wait(trpc['post.byId'].queryOptions, { id: '1' })
+      const post = load.fetch(trpc['post.byId'].queryOptions, { id: '1' })
       return {
         post,
         authorPosts: load.after(post, (value) =>
-          load.start(trpc['post.byAuthor'].queryOptions, {
+          load.prefetch(trpc['post.byAuthor'].queryOptions, {
             authorId: value.authorId,
           }),
         ),
-        feed: load.wait(trpc.feed.infiniteQueryOptions, { limit: 10 }),
+        feed: load.fetch(trpc.feed.infiniteQueryOptions, { limit: 10 }),
       }
     })
 

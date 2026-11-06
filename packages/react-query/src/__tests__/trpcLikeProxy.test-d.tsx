@@ -40,13 +40,13 @@ const trpc = createOptionsProxy(router, new QueryClient())
 describe('a tRPC-like proxy on the public handle APIs', () => {
   const loadHandles = () =>
     trpc.$loadHandles((load) => ({
-      post: load.start(trpc['post.byId'].queryOptions, { id: '1' }),
-      waited: load.wait(trpc['post.byId'].queryOptions, { id: '1' }),
-      comments: load.start(trpc['post.comments'].queryOptions, {
+      post: load.prefetch(trpc['post.byId'].queryOptions, { id: '1' }),
+      fetched: load.fetch(trpc['post.byId'].queryOptions, { id: '1' }),
+      comments: load.prefetch(trpc['post.comments'].queryOptions, {
         postId: '1',
         page: 1,
       }),
-      feed: load.wait(
+      feed: load.fetch(
         trpc.feed.infiniteQueryOptions,
         { limit: 2 },
         { pages: 2 },
@@ -56,10 +56,10 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
   it("should type the input from the procedure's factory", () => {
     assertType(
       trpc.$loadHandles((load) => ({
-        post: load.start(trpc['post.byId'].queryOptions, { id: '1' }),
+        post: load.prefetch(trpc['post.byId'].queryOptions, { id: '1' }),
         // @ts-expect-error the input has the wrong shape
-        wrong: load.wait(trpc['post.byId'].queryOptions, { id: 1 }),
-        feed: load.wait(trpc.feed.infiniteQueryOptions, {
+        wrong: load.fetch(trpc['post.byId'].queryOptions, { id: 1 }),
+        feed: load.fetch(trpc.feed.infiniteQueryOptions, {
           limit: 2,
           // @ts-expect-error the infinite factory takes no cursor
           cursor: 1,
@@ -70,20 +70,20 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
     assertType(trpc['post.byId'].infiniteQueryOptions)
   })
 
-  it('should type handles and the data of waited procedures', async () => {
+  it('should type handles and the data of fetched procedures', async () => {
     const { handles, data } = await loadHandles()
 
     expectTypeOf(handles.post).toEqualTypeOf<
       experimental_QueryHandle<TRPC['post.byId']['queryOptions']>
     >()
-    expectTypeOf(handles.waited).toEqualTypeOf(handles.post)
+    expectTypeOf(handles.fetched).toEqualTypeOf(handles.post)
     expectTypeOf(handles.post).not.toHaveProperty('data')
     expectTypeOf(handles.post.input).toEqualTypeOf<{ id: string }>()
     expectTypeOf(handles.feed.input).toEqualTypeOf<
       Omit<{ limit: number; cursor?: number | null }, 'cursor'>
     >()
     expectTypeOf(data).toEqualTypeOf<{
-      waited: Post
+      fetched: Post
       feed: InfiniteData<FeedPage, unknown>
     }>()
   })
@@ -97,9 +97,9 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
     expectTypeOf(useQuery(trpc.$fromHandle(handles.post)).data).toEqualTypeOf<
       Post | undefined
     >()
-    expectTypeOf(useQuery(trpc.$fromHandle(handles.waited)).data).toEqualTypeOf<
-      Post | undefined
-    >()
+    expectTypeOf(
+      useQuery(trpc.$fromHandle(handles.fetched)).data,
+    ).toEqualTypeOf<Post | undefined>()
     expectTypeOf(
       useSuspenseInfiniteQuery(trpc.$fromHandle(handles.feed)).data,
     ).toEqualTypeOf<InfiniteData<FeedPage, unknown>>()
@@ -186,12 +186,12 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
 
   it("should pass a dependent procedure its parent's data", async () => {
     const { handles, data } = await trpc.$loadHandles((load) => {
-      const post = load.wait(trpc['post.byId'].queryOptions, { id: '1' })
+      const post = load.fetch(trpc['post.byId'].queryOptions, { id: '1' })
       return {
         post,
         authorPosts: load.after(post, (value) => {
           expectTypeOf(value).toEqualTypeOf<Post>()
-          return load.start(trpc['post.byAuthor'].queryOptions, {
+          return load.prefetch(trpc['post.byAuthor'].queryOptions, {
             authorId: value.authorId,
           })
         }),

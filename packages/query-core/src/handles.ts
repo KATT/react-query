@@ -124,7 +124,7 @@ export type InferQueryHandleData<
     ? FactoryData<ReturnType<TFactory>>
     : never
 
-type QueryHandleEntryKind = 'start' | 'wait' | 'ensure'
+type QueryHandleEntryKind = 'prefetch' | 'fetch' | 'ensure'
 
 /**
  * Options for one infinite query that `experimental_loadQueryHandles` starts.
@@ -139,7 +139,7 @@ export interface QueryHandleLoadOptions {
 }
 
 /**
- * The arguments `start`, `wait` and `ensure` take after the factory: its input, if it takes one,
+ * The arguments `prefetch`, `fetch` and `ensure` take after the factory: its input, if it takes one,
  * and for an infinite factory, options like `pages`.
  */
 type QueryHandleLoadArgs<TFactory extends QueryHandleFactory> =
@@ -178,7 +178,7 @@ export interface QueryHandleEntry<
 
 type AnyQueryHandleEntry = QueryHandleEntry<any, any, any>
 
-type WaitedQueryHandleEntry = QueryHandleEntry<any, 'wait' | 'ensure', any>
+type WaitedQueryHandleEntry = QueryHandleEntry<any, 'fetch' | 'ensure', any>
 
 type EntryHandle<TEntry> =
   TEntry extends QueryHandleEntry<infer TFactory, any, infer TNull>
@@ -188,7 +188,7 @@ type EntryHandle<TEntry> =
 type EntryData<TEntry> =
   TEntry extends QueryHandleEntry<
     infer TFactory,
-    'wait' | 'ensure',
+    'fetch' | 'ensure',
     infer TNull
   >
     ? InferQueryHandleData<TFactory> | TNull
@@ -232,22 +232,24 @@ export interface LoadedQueryHandles<
  */
 export interface QueryHandleLoader {
   /**
-   * Starts a query without waiting for it. Its errors show up where a component reads it.
+   * Starts a query without waiting for it, like `queryClient.prefetchQuery`. It fetches only if
+   * the cache has no fresh data. Its errors show up where a component reads it.
    */
-  start: <TFactory extends QueryHandleFactory>(
+  prefetch: <TFactory extends QueryHandleFactory>(
     factory: TFactory,
     ...args: QueryHandleLoadArgs<TFactory>
-  ) => QueryHandleEntry<TFactory, 'start'>
+  ) => QueryHandleEntry<TFactory, 'prefetch'>
   /**
-   * Starts a query and waits for fresh data, like `queryClient.query`.
+   * Starts a query and waits for fresh data, like `queryClient.fetchQuery`. It uses cached data
+   * only if the factory's `staleTime` says it is fresh.
    */
-  wait: <TFactory extends QueryHandleFactory>(
+  fetch: <TFactory extends QueryHandleFactory>(
     factory: TFactory,
     ...args: QueryHandleLoadArgs<TFactory>
-  ) => QueryHandleEntry<TFactory, 'wait'>
+  ) => QueryHandleEntry<TFactory, 'fetch'>
   /**
-   * Starts a query and waits for any data, even stale data, like `queryClient.query` with
-   * `staleTime: 'static'`. If the cache has data, it doesn't fetch.
+   * Uses cached data, even if stale, like `queryClient.ensureQueryData`. It fetches and waits
+   * only when the cache has no data.
    */
   ensure: <TFactory extends QueryHandleFactory>(
     factory: TFactory,
@@ -338,8 +340,8 @@ function isThenable(value: unknown): boolean {
  * ```ts
  * // in a route loader
  * const { handles, data } = await experimental_loadQueryHandles(queryClient, (load) => ({
- *   viewer: load.start(viewerQuery),
- *   post: load.wait(postQuery, { id: params.id }),
+ *   viewer: load.prefetch(viewerQuery),
+ *   post: load.fetch(postQuery, { id: params.id }),
  * }))
  * if (!data.post) throw notFound()
  * return handles
@@ -397,7 +399,7 @@ export async function experimental_loadQueryHandles<
         ...(loadOptions?.pages !== undefined && { pages: loadOptions.pages }),
         ...(kind === 'ensure' && { staleTime: 'static' as const }),
       })
-      if (kind === 'start') {
+      if (kind === 'prefetch') {
         void promise.catch(noop)
         return addEntry(Promise.resolve({ handle, hasData: false }), false)
       }
@@ -416,8 +418,8 @@ export async function experimental_loadQueryHandles<
     }
 
   const load: QueryHandleLoader = {
-    start: startEntry('start') as QueryHandleLoader['start'],
-    wait: startEntry('wait') as QueryHandleLoader['wait'],
+    prefetch: startEntry('prefetch') as QueryHandleLoader['prefetch'],
+    fetch: startEntry('fetch') as QueryHandleLoader['fetch'],
     ensure: startEntry('ensure') as QueryHandleLoader['ensure'],
     after: (parent, start) => {
       if (!open) {
@@ -428,7 +430,7 @@ export async function experimental_loadQueryHandles<
       const parentState = states.get(parent)
       if (!parentState?.waited) {
         throw new Error(
-          'experimental_loadQueryHandles: `load.after` takes a query from `load.wait`, `load.ensure` or `load.after` of the same call.',
+          'experimental_loadQueryHandles: `load.after` takes a query from `load.fetch`, `load.ensure` or `load.after` of the same call.',
         )
       }
       return addEntry(

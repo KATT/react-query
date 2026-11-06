@@ -50,8 +50,8 @@ describe('query handles', () => {
 
     using serverClient = clearOnDispose(new QueryClient())
     const loaded = experimental_loadQueryHandles(serverClient, (load) => ({
-      post: load.wait(postQuery, { id: '1' }),
-      comments: load.start(commentsQuery, { postId: '1' }),
+      post: load.fetch(postQuery, { id: '1' }),
+      comments: load.prefetch(commentsQuery, { postId: '1' }),
     }))
     await vi.advanceTimersByTimeAsync(10)
     const { handles } = await loaded

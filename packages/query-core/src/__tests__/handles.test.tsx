@@ -84,14 +84,14 @@ describe('query handles', () => {
   }
 
   describe('experimental_loadQueryHandles', () => {
-    it('should start every query at once and resolve with handles and the waited data', async () => {
+    it('should start every query at once and resolve with handles and the data it waited for', async () => {
       using _timers = fakeTimers()
       using queryClient = clearOnDispose(new QueryClient())
       const { viewerQuery, postQuery, fetchViewer, fetchPost } = createQueries()
 
       const promise = experimental_loadQueryHandles(queryClient, (load) => ({
-        viewer: load.start(viewerQuery),
-        post: load.wait(postQuery, { id: '1' }),
+        viewer: load.prefetch(viewerQuery),
+        post: load.fetch(postQuery, { id: '1' }),
       }))
 
       expect(fetchViewer).toHaveBeenCalledTimes(1)
@@ -123,8 +123,8 @@ describe('query handles', () => {
       const onResolve = vi.fn<(value: unknown) => void>()
 
       void experimental_loadQueryHandles(queryClient, (load) => ({
-        viewer: load.wait(viewerQuery),
-        post: load.wait(postQuery, { id: '1' }),
+        viewer: load.fetch(viewerQuery),
+        post: load.fetch(postQuery, { id: '1' }),
       })).then(onResolve)
 
       await vi.advanceTimersByTimeAsync(29)
@@ -136,7 +136,7 @@ describe('query handles', () => {
       })
     })
 
-    describe('load.start', () => {
+    describe('load.prefetch', () => {
       it('should not reject or cause an unhandled rejection when the query fails', async () => {
         using onUnhandledRejection = unhandledRejections()
         using queryClient = clearOnDispose(new QueryClient())
@@ -148,8 +148,8 @@ describe('query handles', () => {
         const { handles } = await experimental_loadQueryHandles(
           queryClient,
           (load) => ({
-            rejecting: load.start(rejecting, { id: '1' }),
-            throwing: load.start(throwing, { id: '1' }),
+            rejecting: load.prefetch(rejecting, { id: '1' }),
+            throwing: load.prefetch(throwing, { id: '1' }),
           }),
         )
         await sleep(0)
@@ -178,7 +178,7 @@ describe('query handles', () => {
         queryClient.setQueryData(postQuery({ id: '1' }).queryKey, 'cached')
 
         await experimental_loadQueryHandles(queryClient, (load) => ({
-          post: load.start(postQuery, { id: '1' }),
+          post: load.prefetch(postQuery, { id: '1' }),
         }))
 
         expect(queryFn).not.toHaveBeenCalled()
@@ -201,8 +201,8 @@ describe('query handles', () => {
         })
 
         await experimental_loadQueryHandles(queryClient, (load) => ({
-          feed: load.start(feedQuery, { size: 1 }),
-          noNextPage: load.start(noNextPageQuery, { size: 1 }),
+          feed: load.prefetch(feedQuery, { size: 1 }),
+          noNextPage: load.prefetch(noNextPageQuery, { size: 1 }),
         }))
         await vi.advanceTimersByTimeAsync(0)
 
@@ -216,7 +216,7 @@ describe('query handles', () => {
       })
     })
 
-    describe('load.wait', () => {
+    describe('load.fetch', () => {
       it('should wait for fresh data when the cached data is stale', async () => {
         using _timers = fakeTimers()
         using queryClient = clearOnDispose(new QueryClient())
@@ -226,7 +226,7 @@ describe('query handles', () => {
         queryClient.setQueryData(postQuery({ id: '1' }).queryKey, 'cached')
 
         const promise = experimental_loadQueryHandles(queryClient, (load) => ({
-          post: load.wait(postQuery, { id: '1' }),
+          post: load.fetch(postQuery, { id: '1' }),
         }))
         await vi.advanceTimersByTimeAsync(10)
 
@@ -235,7 +235,7 @@ describe('query handles', () => {
         })
       })
 
-      it('should reject when a waited query fails, but not when a started one does', async () => {
+      it('should reject when a fetched query fails, but not when a prefetched one does', async () => {
         using _timers = fakeTimers()
         using queryClient = clearOnDispose(new QueryClient())
         const failingQuery = createPostQuery(() =>
@@ -244,15 +244,15 @@ describe('query handles', () => {
         const { postQuery } = createQueries()
 
         const started = experimental_loadQueryHandles(queryClient, (load) => ({
-          failing: load.start(failingQuery, { id: '1' }),
-          post: load.wait(postQuery, { id: '1' }),
+          failing: load.prefetch(failingQuery, { id: '1' }),
+          post: load.fetch(postQuery, { id: '1' }),
         }))
         await vi.advanceTimersByTimeAsync(10)
         await expect(started).resolves.toMatchObject({ data: { post: {} } })
 
         await expect(
           experimental_loadQueryHandles(queryClient, (load) => ({
-            failing: load.wait(failingQuery, { id: '2' }),
+            failing: load.fetch(failingQuery, { id: '2' }),
           })),
         ).rejects.toThrow('no')
       })
@@ -271,7 +271,7 @@ describe('query handles', () => {
         })
 
         const promise = experimental_loadQueryHandles(queryClient, (load) => ({
-          comments: load.wait(commentsQuery, { postId: '1' }, { pages: 2 }),
+          comments: load.fetch(commentsQuery, { postId: '1' }, { pages: 2 }),
         }))
         await vi.advanceTimersByTimeAsync(20)
         const { handles, data } = await promise
@@ -378,7 +378,7 @@ describe('query handles', () => {
         )
         expect(queryFn).not.toHaveBeenCalled()
         await experimental_loadQueryHandles(queryClient, (load) => ({
-          post: load.start(postQuery, { id: '1' }),
+          post: load.prefetch(postQuery, { id: '1' }),
         }))
         expect(queryFn).toHaveBeenCalledTimes(1)
       })
@@ -396,7 +396,7 @@ describe('query handles', () => {
 
         const { data } = await experimental_loadQueryHandles(
           queryClient,
-          (load) => ({ post: load.wait(postQuery, { id: '1' }) }),
+          (load) => ({ post: load.fetch(postQuery, { id: '1' }) }),
         )
 
         expect(data.post).toBe('post 1')
@@ -414,7 +414,7 @@ describe('query handles', () => {
 
         const { data } = await experimental_loadQueryHandles(
           queryClient,
-          (load) => ({ post: load.wait(postQuery, { id: '1' }) }),
+          (load) => ({ post: load.fetch(postQuery, { id: '1' }) }),
         )
 
         expect(data.post).toBe('1')
@@ -429,8 +429,8 @@ describe('query handles', () => {
           const { handles, data } = await experimental_loadQueryHandles(
             queryClient,
             (load) => ({
-              viewer: load.start(viewerQuery),
-              post: load.wait(postQuery, params),
+              viewer: load.prefetch(viewerQuery),
+              post: load.fetch(postQuery, params),
             }),
           )
           if (!data.post) throw new NotFoundError()
@@ -462,13 +462,15 @@ describe('query handles', () => {
         } = createQueries()
 
         const promise = experimental_loadQueryHandles(queryClient, (load) => {
-          const post = load.wait(postQuery, { id: '1' })
+          const post = load.fetch(postQuery, { id: '1' })
           return {
-            viewer: load.start(viewerQuery),
+            viewer: load.prefetch(viewerQuery),
             post,
             authorPosts: load.after(post, (value) => {
               const authorId = (value as Post | null)?.authorId
-              return authorId ? load.wait(authorPostsQuery, { authorId }) : null
+              return authorId
+                ? load.fetch(authorPostsQuery, { authorId })
+                : null
             }),
           }
         })
@@ -497,12 +499,14 @@ describe('query handles', () => {
           createQueries()
 
         const promise = experimental_loadQueryHandles(queryClient, (load) => {
-          const post = load.wait(postQuery, { id: '2' })
+          const post = load.fetch(postQuery, { id: '2' })
           return {
             post,
             authorPosts: load.after(post, (value) => {
               const authorId = (value as Post | null)?.authorId
-              return authorId ? load.wait(authorPostsQuery, { authorId }) : null
+              return authorId
+                ? load.fetch(authorPostsQuery, { authorId })
+                : null
             }),
           }
         })
@@ -521,12 +525,12 @@ describe('query handles', () => {
         const notFound = new Error('not found')
 
         const promise = experimental_loadQueryHandles(queryClient, (load) => {
-          const post = load.wait(postQuery, { id: 'missing' })
+          const post = load.fetch(postQuery, { id: 'missing' })
           return {
-            viewer: load.wait(viewerQuery),
+            viewer: load.fetch(viewerQuery),
             authorPosts: load.after(post, (value) => {
               if (!value) throw notFound
-              return load.wait(authorPostsQuery, { authorId: 'a' })
+              return load.fetch(authorPostsQuery, { authorId: 'a' })
             }),
           }
         })
@@ -544,7 +548,7 @@ describe('query handles', () => {
         const { postQuery } = createQueries()
 
         const asyncCallback = (load: experimental_QueryHandleLoader) =>
-          Promise.resolve({ post: load.wait(postQuery, { id: '1' }) })
+          Promise.resolve({ post: load.fetch(postQuery, { id: '1' }) })
 
         await expect(
           // @ts-expect-error the callback can't return a promise
@@ -564,23 +568,23 @@ describe('query handles', () => {
         })
         await vi.advanceTimersByTimeAsync(0)
 
-        expect(() => loader!.start(postQuery, { id: '1' })).toThrow(
+        expect(() => loader!.prefetch(postQuery, { id: '1' })).toThrow(
           'start queries only while its callback runs',
         )
         expect(fetchPost).not.toHaveBeenCalled()
         await expect(promise).resolves.toStrictEqual({ handles: {}, data: {} })
       })
 
-      it('should reject a query from another call, or a started query as a parent', async () => {
+      it('should reject a query from another call, or a prefetched query as a parent', async () => {
         using _timers = fakeTimers()
         using queryClient = clearOnDispose(new QueryClient())
         const { postQuery, authorPostsQuery, viewerQuery } = createQueries()
         let other:
-          | ReturnType<experimental_QueryHandleLoader['wait']>
+          | ReturnType<experimental_QueryHandleLoader['fetch']>
           | undefined
 
         const first = experimental_loadQueryHandles(queryClient, (load) => {
-          other = load.wait(postQuery, { id: '1' })
+          other = load.fetch(postQuery, { id: '1' })
           return {}
         })
         await vi.advanceTimersByTimeAsync(10)
@@ -591,15 +595,15 @@ describe('query handles', () => {
         ).rejects.toThrow('"post" is not a query of this call')
         await expect(
           experimental_loadQueryHandles(queryClient, (load) => {
-            const viewer = load.start(viewerQuery)
+            const viewer = load.prefetch(viewerQuery)
             return {
               // @ts-expect-error `after` needs a query that the load waits for
               posts: load.after(viewer, () =>
-                load.start(authorPostsQuery, { authorId: 'a' }),
+                load.prefetch(authorPostsQuery, { authorId: 'a' }),
               ),
             }
           }),
-        ).rejects.toThrow('`load.after` takes a query from `load.wait`')
+        ).rejects.toThrow('`load.after` takes a query from `load.fetch`')
       })
     })
 
@@ -614,7 +618,7 @@ describe('query handles', () => {
         const postQuery = createPostQuery(queryFn)
         const load = () =>
           experimental_loadQueryHandles(queryClient, (q) => ({
-            post: q.wait(postQuery, { id: '1' }),
+            post: q.fetch(postQuery, { id: '1' }),
           }))
 
         const first = load()
@@ -643,13 +647,13 @@ describe('query handles', () => {
         const postQuery = createPostQuery(queryFn)
 
         const first = experimental_loadQueryHandles(queryClient, (load) => ({
-          post: load.wait(postQuery, { id: '1' }),
+          post: load.fetch(postQuery, { id: '1' }),
         }))
         await vi.advanceTimersByTimeAsync(10)
         await first
         await experimental_loadQueryHandles(queryClient, (load) => ({
-          started: load.start(postQuery, { id: '1' }),
-          waited: load.wait(postQuery, { id: '1' }),
+          prefetched: load.prefetch(postQuery, { id: '1' }),
+          fetched: load.fetch(postQuery, { id: '1' }),
         }))
 
         expect(queryFn).toHaveBeenCalledTimes(1)
@@ -677,7 +681,7 @@ describe('query handles', () => {
       const postQuery = createPostQuery()
       const { handles } = await experimental_loadQueryHandles(
         queryClient,
-        (load) => ({ post: load.start(postQuery, { id: '1' }) }),
+        (load) => ({ post: load.prefetch(postQuery, { id: '1' }) }),
       )
       await vi.advanceTimersByTimeAsync(10)
 
@@ -694,7 +698,7 @@ describe('query handles', () => {
       using queryClient = clearOnDispose(new QueryClient())
       const postQuery = createPostQuery()
       const promise = experimental_loadQueryHandles(queryClient, (load) => ({
-        post: load.wait(postQuery, { id: '1' }),
+        post: load.fetch(postQuery, { id: '1' }),
       }))
       await vi.advanceTimersByTimeAsync(10)
       const { handles } = await promise
@@ -710,7 +714,7 @@ describe('query handles', () => {
       using queryClient = clearOnDispose(new QueryClient())
       const postQuery = createPostQuery()
       const promise = experimental_loadQueryHandles(queryClient, (load) => ({
-        post: load.wait(postQuery, { id: '1' }),
+        post: load.fetch(postQuery, { id: '1' }),
       }))
       await vi.advanceTimersByTimeAsync(10)
       const { handles } = await promise
