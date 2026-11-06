@@ -22,27 +22,21 @@ export const postQuery = (input: { id: string }) =>
   queryOptions({
     queryKey: ['post', input.id] as const,
     queryFn: () => fetchPost(input.id),
-    staleTime: 60 * 1000,
-  })
-
-export const viewerQuery = () =>
-  queryOptions({
-    queryKey: ['viewer'] as const,
-    queryFn: fetchViewer,
-  })
-
-export const authorPostsQuery = (input: { authorId: string }) =>
-  queryOptions({
-    queryKey: ['posts', 'by-author', input.authorId] as const,
-    queryFn: () => fetchAuthorPosts(input.authorId),
   })
 
 export const commentsQuery = (input: { postId: string }) =>
   infiniteQueryOptions({
     queryKey: ['comments', input.postId] as const,
-    queryFn: ({ pageParam }) => fetchComments(input.postId, pageParam),
+    queryFn: ({ pageParam }) =>
+      fetchComments({ postId: input.postId, page: pageParam }),
     initialPageParam: 1,
-    getNextPageParam: (lastPage) => lastPage.nextPage,
+    getNextPageParam: (_lastPage, allPages) => allPages.length + 1,
+  })
+
+export const authorPostsQuery = (input: { authorId: string }) =>
+  queryOptions({
+    queryKey: ['posts', 'by-author', input.authorId] as const,
+    queryFn: () => fetchPostsByAuthor(input.authorId),
   })
 ```
 
@@ -59,23 +53,39 @@ A handle's type comes from its factory's key. Declare keys with `as const`: two 
 ```tsx
 import { experimental_loadQueryHandles } from '@tanstack/react-query'
 
+// The loader gets queryClient from createRouter({ routeTree, context: { queryClient } })
 export const Route = createFileRoute('/posts/$id')({
   loader: async ({ context: { queryClient }, params }) => {
-    const { handles } = await experimental_loadQueryHandles(
+    const { handles, data } = await experimental_loadQueryHandles(
       queryClient,
       (load) => ({
-        // The page can't render without the post, so wait for it
-        post: load.fetch(postQuery, { id: params.id }),
-        // Start the viewer without waiting, and stream it in
-        viewer: load.prefetch(viewerQuery),
+        // Uses a cached post, even a stale one, and waits only when there is none
+        post: load.ensure(postQuery, { id: params.id }),
+        // Doesn't wait
+        comments: load.prefetch(commentsQuery, { postId: params.id }),
       }),
     )
+    if (!data.post) throw notFound()
     return handles
   },
+  component: PostPage,
 })
+
+function PostPage() {
+  const { post, comments } = Route.useLoaderData()
+  return (
+    <article>
+      <Title post={post} />
+      <Comments comments={comments} />
+      <MorePosts post={post} />
+    </article>
+  )
+}
 ```
 
 [//]: # 'Loader'
+
+`Title` and `Comments` read their handles, as [Reading handles](#reading-handles) shows. `MorePosts` needs the post's author, so it starts its own query, as [Waterfalls](#waterfalls-experimental_waterfallhandle) shows.
 
 `load` has three ways to start a query. Each takes the factory, then the factory's input:
 
@@ -85,7 +95,7 @@ export const Route = createFileRoute('/posts/$id')({
 | `load.fetch`    | fresh data, by the factory's `staleTime`     | `fetchQuery`      |
 | `load.ensure`   | any data, and fetches only if none is cached | `ensureQueryData` |
 
-The names follow the `QueryClient` methods that [`queryClient.query` replaces](./prefetching.md#using-query-to-prefetch), and each one behaves like its namesake. `load.prefetch` and `load.fetch` fetch only when the cache has no fresh data, by the query's `staleTime`. `load.prefetch` doesn't wait and doesn't reject: fetch errors show up where a component reads the handle.
+The names follow the `QueryClient` methods that [`queryClient.query` replaces](./prefetching.md#using-query-to-prefetch), and each one behaves like its namesake. `load.prefetch` and `load.fetch` fetch only when the cache has no fresh data, by the query's `staleTime`. `load.prefetch` doesn't wait and doesn't reject: fetch errors show up where a component reads the handle. Use `load.fetch` when the page must not render stale data.
 
 Every query starts before anything waits. The callback can't be async, and `load` throws once the callback returns, so you can't start a query after an `await`. The promise resolves when every query the load waits for has data, and rejects as soon as one of them fails, so a loader can redirect or show an error page.
 
@@ -96,101 +106,64 @@ It resolves to two objects:
 
 ### Not found and redirects
 
-Use `data` to decide what the loader does, like throwing `notFound()` when a post doesn't exist:
-
-[//]: # 'NotFound'
-
-```tsx
-loader: async ({ context: { queryClient }, params }) => {
-  const { handles, data } = await experimental_loadQueryHandles(
-    queryClient,
-    (load) => ({
-      post: load.fetch(postQuery, { id: params.id }),
-      viewer: load.prefetch(viewerQuery),
-    }),
-  )
-  if (!data.post) throw notFound()
-  return handles
-}
-```
-
-[//]: # 'NotFound'
-
-The viewer started together with the post, so checking the post doesn't hold it back.
+Use `data` to decide what the loader does, like the loader above, which throws `notFound()` when the post doesn't exist. The comments started together with the post, so checking the post doesn't hold them back.
 
 ### Using cached data, even if stale
 
-`load.ensure` works like `ensureQueryData`, or `queryClient.query` with `staleTime: 'static'`. If the cache has data, even stale data, it resolves at once without fetching. If not, it fetches once and waits:
+`load.ensure` works like `ensureQueryData`, or `queryClient.query` with `staleTime: 'static'`. If the cache has data, even stale data, it resolves at once without fetching. If not, it fetches once and waits. The loader above ensures the post:
 
 [//]: # 'EnsureData'
 
 ```tsx
-const { handles } = await experimental_loadQueryHandles(
-  queryClient,
-  (load) => ({
-    // If we have the post loaded already, we don't want to block on a refetch.
-    // Otherwise wait for it, and throw if it fails
-    post: load.ensure(postQuery, { id: params.id }),
-  }),
-)
+// If we have the post loaded already, we don't want to block on a refetch.
+// Otherwise wait for it, and throw if it fails
+post: load.ensure(postQuery, { id: params.id }),
 ```
 
 [//]: # 'EnsureData'
 
 The loader doesn't refetch stale data. The component that reads the handle does: it uses the factory's `staleTime`, so it refetches stale data in the background when it mounts.
 
-### Queries that need another query's data
-
-Sometimes a query's input comes from another query's data. The page shows more posts by the post's author, and only the post knows the author. `load.after` starts such a query as soon as the other query's data is in the cache:
-
-[//]: # 'After'
-
-```tsx
-const { handles, data } = await experimental_loadQueryHandles(
-  queryClient,
-  (load) => {
-    const post = load.fetch(postQuery, { id: params.id })
-    return {
-      post,
-      viewer: load.prefetch(viewerQuery),
-      morePosts: load.after(post, (post) =>
-        post
-          ? load.prefetch(authorPostsQuery, { authorId: post.authorId })
-          : null,
-      ),
-    }
-  },
-)
-if (!data.post) throw notFound()
-return handles
-```
-
-[//]: # 'After'
-
-`load.after` takes a query from `load.fetch`, `load.ensure` or another `load.after`, and a callback that gets its data and starts the dependent query with `load`. Return `null` to start nothing; the handle is then `null`. The viewer doesn't wait for the post, and the author's posts don't wait for the viewer. The load waits for the post, and for the author's posts only if the callback used `load.fetch` or `load.ensure`.
-
-To end the load early, throw from the callback: `if (!post) throw notFound()`. The load rejects at once, without waiting for its other queries.
-
 ### Infinite queries
 
-Infinite factories work like the others. Their `data` is `InfiniteData`, with `pages` and `pageParams`. To fetch more than the first page, pass `pages` after the input:
+Infinite factories work like the others. The loader above prefetches the first page of comments without waiting. To fetch more than the first page, pass `pages` after the input:
 
 [//]: # 'Infinite'
 
 ```tsx
-const { handles, data } = await experimental_loadQueryHandles(
-  queryClient,
-  (load) => ({
-    post: load.fetch(postQuery, { id: params.id }),
-    comments: load.fetch(commentsQuery, { postId: params.id }, { pages: 2 }),
-  }),
-)
-data.comments.pages // the first two pages
+comments: load.prefetch(commentsQuery, { postId: params.id }, { pages: 2 }),
 ```
 
 [//]: # 'Infinite'
 
-`pages` is the number of pages the load fetches, starting from the first, like the `pages` option of `queryClient.infiniteQuery`. It stays out of the factory, so readers don't get it: when they refetch, they fetch every page they have.
+`pages` is the number of pages the load fetches, starting from the first, like the `pages` option of `queryClient.infiniteQuery`. It stays out of the factory, so readers don't get it: when they refetch, they fetch every page they have. With `load.fetch` or `load.ensure`, the comments' `data` is `InfiniteData`, with `pages` and `pageParams`.
+
+### Queries that need another query's data
+
+"More by this author" needs the post's author, so its query can't start until the post's data arrives. By default, start it in the component that has the post, like `MorePosts` in [Waterfalls](#waterfalls-experimental_waterfallhandle). That keeps the loader short, and the page renders without waiting for it.
+
+To start it in the loader instead, use `load.after`. It starts the dependent query as soon as the post's data is in the cache, before the page renders:
+
+[//]: # 'After'
+
+```tsx
+;(load) => {
+  const post = load.ensure(postQuery, { id: params.id })
+  return {
+    post,
+    comments: load.prefetch(commentsQuery, { postId: params.id }),
+    authorPosts: load.after(post, (post) =>
+      post
+        ? load.prefetch(authorPostsQuery, { authorId: post.authorId })
+        : null,
+    ),
+  }
+}
+```
+
+[//]: # 'After'
+
+`load.after` takes a query from `load.fetch`, `load.ensure` or another `load.after`, and a callback that gets its data and starts the dependent query with `load`. Return `null` to start nothing; the handle is then `null`. The comments don't wait for the post, and the author's posts don't wait for the comments. The load waits for the post, and for the author's posts only if the callback used `load.fetch` or `load.ensure`. To end the load early, throw from the callback: `if (!post) throw notFound()`.
 
 ### Pitfalls
 
@@ -204,7 +177,7 @@ const session = await getSession()
 const { handles } = await experimental_loadQueryHandles(
   queryClient,
   (load) => ({
-    viewer: load.prefetch(viewerQuery),
+    comments: load.prefetch(commentsQuery, { postId: params.id }),
   }),
 )
 ```
@@ -227,14 +200,14 @@ async function allKeyed<T extends Record<string, unknown>>(
 const { session, loaded } = await allKeyed({
   session: getSession(),
   loaded: experimental_loadQueryHandles(queryClient, (load) => ({
-    viewer: load.prefetch(viewerQuery),
+    comments: load.prefetch(commentsQuery, { postId: params.id }),
   })),
 })
 ```
 
 [//]: # 'PromiseAllKeyed'
 
-**Two loads in a row.** The second load starts only when the first resolves. Put the queries in one load, and use `load.after` for the ones that need another query's data.
+**Two loads in a row.** The second load starts only when the first resolves. Put the queries in one load. Start the ones that need another query's data in a component, or with `load.after`.
 
 **`load.after` when you already have the input.** The input of the author's posts is in the post's data, so `load.after` is right there. The post's comments only need the post's id, which the loader already has in `params`. Start them with `load.prefetch(commentsQuery, { postId: params.id })`, not inside `load.after`, or they wait for the post for nothing.
 
@@ -249,16 +222,27 @@ const { session, loaded } = await allKeyed({
 ```tsx
 import {
   experimental_fromHandle,
+  useSuspenseInfiniteQuery,
   useSuspenseQuery,
   type experimental_QueryHandle,
 } from '@tanstack/react-query'
 
-function Post(props: { post: experimental_QueryHandle<typeof postQuery> }) {
-  const { data } = useSuspenseQuery({
+function Title(props: { post: experimental_QueryHandle<typeof postQuery> }) {
+  const { data: title } = useSuspenseQuery({
     ...experimental_fromHandle(postQuery, props.post),
     select: (post) => post.title,
   })
-  return <h1>{data}</h1>
+  return <h1>{title}</h1>
+}
+
+// An infinite factory's handle reads with the infinite hooks
+function Comments(props: {
+  comments: experimental_QueryHandle<typeof commentsQuery>
+}) {
+  const { data, fetchNextPage } = useSuspenseInfiniteQuery(
+    experimental_fromHandle(commentsQuery, props.comments),
+  )
+  return <button onClick={() => fetchNextPage()}>{data.pages.length}</button>
 }
 ```
 
@@ -270,24 +254,9 @@ Readers get the query's data from the cache. To get defined `data`, read the han
 
 ## Waterfalls: `experimental_waterfallHandle`
 
-Sometimes you only know the input during render, like a search term, a page a user clicks to, or an id in another query's data. `experimental_waterfallHandle` builds the handle for such an input. It doesn't start the query: the component that reads the handle does, when it renders. That makes it a [request waterfall](./request-waterfalls.md), and the name keeps that visible. It is a plain function, not a hook, so you can call it anywhere.
+Sometimes you only know the input during render, like an id in another query's data or a search term the user types. `experimental_waterfallHandle` builds the handle for such an input. It doesn't start the query: the component that reads the handle does, when it renders. That makes it a [request waterfall](./request-waterfalls.md), and the name keeps that visible. It is a plain function, not a hook, so you can call it anywhere.
 
-Pass it an input:
-
-[//]: # 'WaterfallInput'
-
-```tsx
-function Search(props: { term: string }) {
-  const results = experimental_waterfallHandle(searchQuery, {
-    term: props.term,
-  })
-  const { data } = useQuery(experimental_fromHandle(searchQuery, results))
-}
-```
-
-[//]: # 'WaterfallInput'
-
-When the input comes from another query's data and the loader didn't start that query, start the dependent query in the component that has the data. If the loader starts both, use [`load.after`](#queries-that-need-another-querys-data) instead, so the dependent query starts before the page renders:
+"More by this author" needs the post's author, so it can't start until the post's data arrives. Start it in the component that has the post:
 
 [//]: # 'WaterfallDependent'
 
@@ -304,38 +273,45 @@ function MorePosts(props: {
   const { data } = useQuery(
     experimental_fromHandle(authorPostsQuery, authorPosts),
   )
+  return (
+    <ul>
+      {data?.map((p) => (
+        <li key={p.id}>{p.title}</li>
+      ))}
+    </ul>
+  )
 }
 ```
 
 [//]: # 'WaterfallDependent'
 
-Most pages don't need this. Put the input in the URL, or have the post's query return what the page needs, so the loader can start everything at once.
+To start it before the page renders, use [`load.after`](#queries-that-need-another-querys-data) in the loader. Or have the post's query return what the page needs, so the loader can start everything at once.
 
-Or switch a handle a loader passed down to a new input:
+You can also switch a handle a loader passed down to a new input. A search page's loader starts the results for the term in the URL, and the search box then fetches results as the user types:
 
 [//]: # 'WaterfallSwitch'
 
 ```tsx
-function Posts(props: { posts: experimental_QueryHandle<typeof postsQuery> }) {
-  const [page, setPage] = React.useState(props.posts.input.page)
-  const posts = experimental_waterfallHandle(
-    postsQuery,
-    props.posts,
-    (input) => ({
-      ...input,
-      page,
-    }),
+function Search(props: {
+  results: experimental_QueryHandle<typeof searchQuery>
+}) {
+  const [term, setTerm] = React.useState(props.results.input.term)
+  const results = experimental_waterfallHandle(
+    searchQuery,
+    props.results,
+    (input) => ({ ...input, term }),
   )
   const { data } = useQuery({
-    ...experimental_fromHandle(postsQuery, posts),
+    ...experimental_fromHandle(searchQuery, results),
     placeholderData: keepPreviousData,
   })
+  return <input value={term} onChange={(e) => setTerm(e.target.value)} />
 }
 ```
 
 [//]: # 'WaterfallSwitch'
 
-`page` starts from the handle's input, so the first render reads the query the loader started instead of fetching another page. While the switched input maps to the handle's own query, it returns that handle as is, so the first page reads what the loader started. That also keeps the old input when only fields outside the key change, so put everything the `queryFn` reads in the key. Prefer putting such inputs in the URL so the loader can start them, and use `experimental_waterfallHandle` when that isn't practical.
+`term` starts from the handle's input, so the first render reads the query the loader started instead of fetching again. While the switched input maps to the handle's own query, it returns that handle as is. That also keeps the old input when only fields outside the key change, so put everything the `queryFn` reads in the key. Keep state that belongs in the URL, like a page number, in the URL, so the loader can start it.
 
 The query starts when its reader renders, like any other `useQuery` or `useSuspenseQuery`. `useQuery` doesn't fetch during a server render, while `useSuspenseQuery` does.
 
@@ -364,7 +340,7 @@ const queryClient = new QueryClient({
 
 [//]: # 'DehydratePending'
 
-A Server Component can then wait for the post and stream the comments:
+A Server Component can then ensure the post and stream the comments:
 
 [//]: # 'StreamingPage'
 
@@ -375,7 +351,7 @@ export default async function PostPage({ params }) {
   const { handles, data } = await experimental_loadQueryHandles(
     queryClient,
     (load) => ({
-      post: load.fetch(postQuery, { id: params.id }),
+      post: load.ensure(postQuery, { id: params.id }),
       comments: load.prefetch(commentsQuery, { postId: params.id }),
     }),
   )
@@ -383,7 +359,7 @@ export default async function PostPage({ params }) {
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
-      <Post post={handles.post} />
+      <Title post={handles.post} />
       <Suspense fallback={<Spinner />}>
         <Comments comments={handles.comments} />
       </Suspense>
@@ -397,10 +373,10 @@ export default async function PostPage({ params }) {
 export function Comments(props: {
   comments: experimental_QueryHandle<typeof commentsQuery>
 }) {
-  const { data } = useSuspenseInfiniteQuery(
+  const { data, fetchNextPage } = useSuspenseInfiniteQuery(
     experimental_fromHandle(commentsQuery, props.comments),
   )
-  return <CommentList comments={data.pages.flatMap((page) => page.comments)} />
+  return <button onClick={() => fetchNextPage()}>{data.pages.length}</button>
 }
 ```
 
@@ -426,7 +402,7 @@ const postQuery = (input: { id: string }) =>
 const { handles } = await experimental_loadQueryHandles(
   queryClient,
   (load) => ({
-    post: load.fetch(postQuery, { id }),
+    post: load.ensure(postQuery, { id }),
   }),
 )
 

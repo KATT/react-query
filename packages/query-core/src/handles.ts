@@ -340,8 +340,10 @@ function isThenable(value: unknown): boolean {
  * ```ts
  * // in a route loader
  * const { handles, data } = await experimental_loadQueryHandles(queryClient, (load) => ({
- *   viewer: load.prefetch(viewerQuery),
- *   post: load.fetch(postQuery, { id: params.id }),
+ *   // Uses a cached post, even a stale one, and waits only when there is none
+ *   post: load.ensure(postQuery, { id: params.id }),
+ *   // Doesn't wait
+ *   comments: load.prefetch(commentsQuery, { postId: params.id }),
  * }))
  * if (!data.post) throw notFound()
  * return handles
@@ -479,18 +481,21 @@ export async function experimental_loadQueryHandles<
 }
 
 /**
- * Builds the handle of a query whose input you only know during render, like a search term or a
- * page a user clicks to. It doesn't start the query: the component that reads the handle does,
- * when it renders, which makes it a request waterfall. The name keeps that visible. Prefer
- * starting queries in a route loader or server component with `experimental_queryHandle`.
+ * Builds the handle of a query whose input you only know during render, like an id in another
+ * query's data or a search term. It doesn't start the query: the component that reads the handle
+ * does, when it renders, which makes it a request waterfall. The name keeps that visible. Prefer
+ * starting queries in a route loader or server component with `experimental_loadQueryHandles`.
  * @param factory - The query factory, a function of the query's input that returns its options.
  * @param input - The input to pass to the factory, if it takes one.
  * @returns A handle with the query's key and input.
  * @example
  * ```tsx
- * function Search(props: { term: string }) {
- *   const results = experimental_waterfallHandle(searchQuery, { term: props.term })
- *   const { data } = useQuery(experimental_fromHandle(searchQuery, results))
+ * function MorePosts(props: { post: experimental_QueryHandle<typeof postQuery> }) {
+ *   const { data: post } = useSuspenseQuery(experimental_fromHandle(postQuery, props.post))
+ *   const authorPosts = experimental_waterfallHandle(authorPostsQuery, {
+ *     authorId: post.authorId,
+ *   })
+ *   const { data } = useQuery(experimental_fromHandle(authorPostsQuery, authorPosts))
  * }
  * ```
  */
@@ -498,13 +503,13 @@ export function experimental_waterfallHandle<
   TFactory extends QueryHandleFactory,
 >(factory: TFactory, ...input: QueryHandleArgs<TFactory>): QueryHandle<TFactory>
 /**
- * Switches a handle, like one a loader passed down, to a new input, like the next page, and
- * returns the handle for that input. It doesn't start the query: the component that reads the
- * handle does, when it renders, which makes it a request waterfall. Prefer passing the new input
- * to the loader through the URL.
+ * Switches a handle, like one a loader passed down, to a new input, like a search term the user
+ * types, and returns the handle for that input. It doesn't start the query: the component that
+ * reads the handle does, when it renders, which makes it a request waterfall. Inputs that belong
+ * in the URL, like a page number, should go to the loader instead.
  *
  * While the new input maps to the handle's own query, it returns the handle as is, so the first
- * page reads what the loader started. That also keeps the old input when only fields outside the
+ * render reads what the loader started. That also keeps the old input when only fields outside the
  * key change, so put everything the `queryFn` reads in the key.
  * @param factory - The factory that started the handle's query.
  * @param handle - The handle to switch from.
@@ -513,14 +518,17 @@ export function experimental_waterfallHandle<
  * input.
  * @example
  * ```tsx
- * function Posts(props: { posts: experimental_QueryHandle<typeof postsQuery> }) {
- *   // Start from the loader's page, so the first render reads the query it started
- *   const [page, setPage] = React.useState(props.posts.input.page)
- *   const posts = experimental_waterfallHandle(postsQuery, props.posts, (input) => ({
+ * function Search(props: { results: experimental_QueryHandle<typeof searchQuery> }) {
+ *   // Start from the loader's term, so the first render reads the query it started
+ *   const [term, setTerm] = React.useState(props.results.input.term)
+ *   const results = experimental_waterfallHandle(searchQuery, props.results, (input) => ({
  *     ...input,
- *     page,
+ *     term,
  *   }))
- *   const { data } = useQuery(experimental_fromHandle(postsQuery, posts))
+ *   const { data } = useQuery({
+ *     ...experimental_fromHandle(searchQuery, results),
+ *     placeholderData: keepPreviousData,
+ *   })
  * }
  * ```
  */
