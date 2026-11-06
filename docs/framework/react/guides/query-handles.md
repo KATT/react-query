@@ -65,9 +65,9 @@ export const Route = createFileRoute('/posts/$id')({
       queryClient,
       (load) => ({
         // The page can't render without the post, so wait for it
-        post: load.wait(postQuery, { id: params.id }),
+        post: load.fetch(postQuery, { id: params.id }),
         // Start the viewer without waiting, and stream it in
-        viewer: load.start(viewerQuery),
+        viewer: load.prefetch(viewerQuery),
       }),
     )
     return handles
@@ -79,20 +79,20 @@ export const Route = createFileRoute('/posts/$id')({
 
 `load` has three ways to start a query. Each takes the factory, then the factory's input:
 
-| Function      | Waits for                     |
-| ------------- | ----------------------------- |
-| `load.start`  | nothing                       |
-| `load.wait`   | fresh data                    |
-| `load.ensure` | any data, even if it is stale |
+| Function        | Waits for                                    | Like              |
+| --------------- | -------------------------------------------- | ----------------- |
+| `load.prefetch` | nothing                                      | `prefetchQuery`   |
+| `load.fetch`    | fresh data, by the factory's `staleTime`     | `fetchQuery`      |
+| `load.ensure`   | any data, and fetches only if none is cached | `ensureQueryData` |
 
-`load.start` and `load.wait` use the query's `staleTime` like `queryClient.query`: they fetch only when the cache has no fresh data. `load.start` doesn't wait and doesn't reject: fetch errors show up where a component reads the handle.
+The names follow the `QueryClient` methods that [`queryClient.query` replaces](./prefetching.md#using-query-to-prefetch), and each one behaves like its namesake. `load.prefetch` and `load.fetch` fetch only when the cache has no fresh data, by the query's `staleTime`. `load.prefetch` doesn't wait and doesn't reject: fetch errors show up where a component reads the handle.
 
 Every query starts before anything waits. The callback can't be async, and `load` throws once the callback returns, so you can't start a query after an `await`. The promise resolves when every query the load waits for has data, and rejects as soon as one of them fails, so a loader can redirect or show an error page.
 
 It resolves to two objects:
 
 - `handles`: a handle for every query, by name. Return them from the loader, or pass them as props.
-- `data`: the data of every query from `load.wait` and `load.ensure`, by name, like `useSuspenseQuery`'s `data`. Queries from `load.start` have no data yet, so `data` leaves them out.
+- `data`: the data of every query from `load.fetch` and `load.ensure`, by name, like `useSuspenseQuery`'s `data`. Queries from `load.prefetch` have no data yet, so `data` leaves them out.
 
 ### Not found and redirects
 
@@ -105,8 +105,8 @@ loader: async ({ context: { queryClient }, params }) => {
   const { handles, data } = await experimental_loadQueryHandles(
     queryClient,
     (load) => ({
-      post: load.wait(postQuery, { id: params.id }),
-      viewer: load.start(viewerQuery),
+      post: load.fetch(postQuery, { id: params.id }),
+      viewer: load.prefetch(viewerQuery),
     }),
   )
   if (!data.post) throw notFound()
@@ -120,7 +120,7 @@ The viewer started together with the post, so checking the post doesn't hold it 
 
 ### Using cached data, even if stale
 
-`load.ensure` is the handle version of `queryClient.query` with `staleTime: 'static'`, which [replaces the deprecated `ensureQueryData`](./prefetching.md#using-query-to-prefetch). If the cache has data, even stale data, it resolves at once without fetching. If not, it fetches once and waits:
+`load.ensure` works like `ensureQueryData`, or `queryClient.query` with `staleTime: 'static'`. If the cache has data, even stale data, it resolves at once without fetching. If not, it fetches once and waits:
 
 [//]: # 'EnsureData'
 
@@ -149,12 +149,14 @@ Sometimes a query's input comes from another query's data. The page shows more p
 const { handles, data } = await experimental_loadQueryHandles(
   queryClient,
   (load) => {
-    const post = load.wait(postQuery, { id: params.id })
+    const post = load.fetch(postQuery, { id: params.id })
     return {
       post,
-      viewer: load.start(viewerQuery),
+      viewer: load.prefetch(viewerQuery),
       morePosts: load.after(post, (post) =>
-        post ? load.start(authorPostsQuery, { authorId: post.authorId }) : null,
+        post
+          ? load.prefetch(authorPostsQuery, { authorId: post.authorId })
+          : null,
       ),
     }
   },
@@ -165,7 +167,7 @@ return handles
 
 [//]: # 'After'
 
-`load.after` takes a query from `load.wait`, `load.ensure` or another `load.after`, and a callback that gets its data and starts the dependent query with `load`. Return `null` to start nothing; the handle is then `null`. The viewer doesn't wait for the post, and the author's posts don't wait for the viewer. The load waits for the post, and for the author's posts only if the callback used `load.wait` or `load.ensure`.
+`load.after` takes a query from `load.fetch`, `load.ensure` or another `load.after`, and a callback that gets its data and starts the dependent query with `load`. Return `null` to start nothing; the handle is then `null`. The viewer doesn't wait for the post, and the author's posts don't wait for the viewer. The load waits for the post, and for the author's posts only if the callback used `load.fetch` or `load.ensure`.
 
 To end the load early, throw from the callback: `if (!post) throw notFound()`. The load rejects at once, without waiting for its other queries.
 
@@ -179,8 +181,8 @@ Infinite factories work like the others. Their `data` is `InfiniteData`, with `p
 const { handles, data } = await experimental_loadQueryHandles(
   queryClient,
   (load) => ({
-    post: load.wait(postQuery, { id: params.id }),
-    comments: load.wait(commentsQuery, { postId: params.id }, { pages: 2 }),
+    post: load.fetch(postQuery, { id: params.id }),
+    comments: load.fetch(commentsQuery, { postId: params.id }, { pages: 2 }),
   }),
 )
 data.comments.pages // the first two pages
@@ -202,20 +204,41 @@ const session = await getSession()
 const { handles } = await experimental_loadQueryHandles(
   queryClient,
   (load) => ({
-    viewer: load.start(viewerQuery),
+    viewer: load.prefetch(viewerQuery),
   }),
 )
 ```
 
 [//]: # 'AwaitBefore'
 
-Make it a query and start it in the same load, or start the load first and await both with `Promise.all`.
+Make it a query and start it in the same load, or start the load and the other promise together and await both. For named results, define a small `allKeyed`. It mirrors [`Promise.allKeyed`](https://github.com/tc39/proposal-await-dictionary), a Stage 3 TC39 proposal, without patching `Promise`:
+
+[//]: # 'PromiseAllKeyed'
+
+```tsx
+async function allKeyed<T extends Record<string, unknown>>(
+  record: T,
+): Promise<{ [K in keyof T]: Awaited<T[K]> }> {
+  const keys = Object.keys(record)
+  const values = await Promise.all(keys.map((key) => record[key]))
+  return Object.fromEntries(keys.map((key, i) => [key, values[i]])) as any
+}
+
+const { session, loaded } = await allKeyed({
+  session: getSession(),
+  loaded: experimental_loadQueryHandles(queryClient, (load) => ({
+    viewer: load.prefetch(viewerQuery),
+  })),
+})
+```
+
+[//]: # 'PromiseAllKeyed'
 
 **Two loads in a row.** The second load starts only when the first resolves. Put the queries in one load, and use `load.after` for the ones that need another query's data.
 
-**`load.after` when you already have the input.** The input of the author's posts is in the post's data, so `load.after` is right there. The post's comments only need the post's id, which the loader already has in `params`. Start them with `load.start(commentsQuery, { postId: params.id })`, not inside `load.after`, or they wait for the post for nothing.
+**`load.after` when you already have the input.** The input of the author's posts is in the post's data, so `load.after` is right there. The post's comments only need the post's id, which the loader already has in `params`. Start them with `load.prefetch(commentsQuery, { postId: params.id })`, not inside `load.after`, or they wait for the post for nothing.
 
-**Started queries after `load.after`.** A dependent query's handle needs its parent's data, so the load waits for the parent even when the callback uses `load.start`.
+**Prefetched queries in `load.after`.** A dependent query's handle needs its parent's data, so the load waits for the parent even when the callback uses `load.prefetch`.
 
 ## Reading handles
 
@@ -322,7 +345,7 @@ Queries you start with handles work with the [hydration APIs](./advanced-ssr.md)
 
 ### Streaming pending queries
 
-`dehydrate` only includes successful queries by default. To stream a query that `load.start` started and that is still pending, opt in through `shouldDehydrateQuery`. A pending query dehydrates to a promise, so the page needs a transport that can send promises, like React Server Components, TanStack Start or React Router:
+`dehydrate` only includes successful queries by default. To stream a query that `load.prefetch` started and that is still pending, opt in through `shouldDehydrateQuery`. A pending query dehydrates to a promise, so the page needs a transport that can send promises, like React Server Components, TanStack Start or React Router:
 
 [//]: # 'DehydratePending'
 
@@ -352,8 +375,8 @@ export default async function PostPage({ params }) {
   const { handles, data } = await experimental_loadQueryHandles(
     queryClient,
     (load) => ({
-      post: load.wait(postQuery, { id: params.id }),
-      comments: load.start(commentsQuery, { postId: params.id }),
+      post: load.fetch(postQuery, { id: params.id }),
+      comments: load.prefetch(commentsQuery, { postId: params.id }),
     }),
   )
   if (!data.post) notFound()
@@ -403,7 +426,7 @@ const postQuery = (input: { id: string }) =>
 const { handles } = await experimental_loadQueryHandles(
   queryClient,
   (load) => ({
-    post: load.wait(postQuery, { id }),
+    post: load.fetch(postQuery, { id }),
   }),
 )
 
