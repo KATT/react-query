@@ -34,7 +34,7 @@ type QueryHandleInput<TFactory extends QueryHandleFactory> =
  * factory's other parameters are left out, because a handle only carries the input, so
  * `experimental_fromHandle` couldn't pass them on.
  */
-type QueryHandleArgs<TFactory extends QueryHandleFactory> =
+export type QueryHandleArgs<TFactory extends QueryHandleFactory> =
   Parameters<TFactory> extends []
     ? []
     : Parameters<TFactory> extends [infer TInput, ...Array<any>]

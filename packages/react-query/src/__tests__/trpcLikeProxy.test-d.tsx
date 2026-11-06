@@ -188,4 +188,32 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
       experimental_InferQueryHandleData<typeof feed>
     >().toEqualTypeOf<InfiniteData<FeedPage, unknown>>()
   })
+
+  it('should type handles and data loaded together', async () => {
+    const { handles, data } = await trpc.$loadHandles((q) => {
+      const post = q.wait(trpc['post.byId'].queryOptions, { id: '1' })
+      return {
+        post,
+        comments: q.after(post, (value) => {
+          expectTypeOf(value).toEqualTypeOf<Post>()
+          return q.start(trpc['post.comments'].queryOptions, {
+            postId: value.id,
+            page: 1,
+          })
+        }),
+        feed: q.ensure(trpc.feed.infiniteQueryOptions, { limit: 10 }),
+      }
+    })
+
+    expectTypeOf(data.post).toEqualTypeOf<Post>()
+    expectTypeOf(data.feed.pages).toEqualTypeOf<Array<FeedPage>>()
+    expectTypeOf(data).not.toHaveProperty('comments')
+    expectTypeOf(
+      trpc.$fromHandle(handles.comments).queryKey[0],
+    ).toEqualTypeOf<'post.comments'>()
+    expectTypeOf(trpc.$getQueryHandleData(handles.post)).toEqualTypeOf<Post>()
+    assertType<experimental_QueryHandle<TRPC['post.comments']['queryOptions']>>(
+      handles.comments,
+    )
+  })
 })

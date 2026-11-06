@@ -60,6 +60,13 @@ export type {
   QueryHandle as experimental_QueryHandle,
   QueryHandleFactory as experimental_QueryHandleFactory,
 } from './handles'
+export { experimental_loadQueryHandles } from './loadQueryHandles'
+export type {
+  DependentQueryHandleEntry as experimental_DependentQueryHandleEntry,
+  LoadedQueryHandles as experimental_LoadedQueryHandles,
+  QueryHandleEntry as experimental_QueryHandleEntry,
+  QueryHandlesBuilder as experimental_QueryHandlesBuilder,
+} from './loadQueryHandles'
 
 // Types
 export type {
