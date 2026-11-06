@@ -345,6 +345,24 @@ describe('query handles', () => {
       expectTypeOf(data).toEqualTypeOf<Post | undefined>()
     })
 
+    it('should accept keepPreviousData as placeholderData for a switched infinite handle', () => {
+      const loaderHandle = experimental_waterfallHandle(feedQuery, { size: 1 })
+      const handle = experimental_waterfallHandle(
+        feedQuery,
+        loaderHandle,
+        (input) => ({ ...input, size: 2 }),
+      )
+
+      const { data } = useInfiniteQuery({
+        ...experimental_fromHandle(feedQuery, handle),
+        placeholderData: keepPreviousData,
+      })
+
+      expectTypeOf(data).toEqualTypeOf<
+        InfiniteData<Array<number>, unknown> | undefined
+      >()
+    })
+
     it('should work with infinite queries', () => {
       const handle = experimental_waterfallHandle(feedQuery, {
         size: 1,

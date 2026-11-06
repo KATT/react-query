@@ -525,8 +525,10 @@ describe('query handles', () => {
         '1': { title: 'Hello', authorId: 'a' },
       }
       const fetchAuthorPosts = vi.fn<
-        (authorId: string) => Promise<Array<string>>
-      >((authorId) => sleep(10).then(() => [`more by ${authorId}`]))
+        (authorId: string, page: number) => Promise<Array<string>>
+      >((authorId, page) =>
+        sleep(10).then(() => [`more by ${authorId}, page ${page}`]),
+      )
       return {
         fetchAuthorPosts,
         postQuery: (input: { id: string }) => ({
@@ -535,7 +537,13 @@ describe('query handles', () => {
         }),
         authorPostsQuery: (input: { authorId: string }) => ({
           queryKey: [...key, 'author-posts', input.authorId],
-          queryFn: () => fetchAuthorPosts(input.authorId),
+          queryFn: ({ pageParam }: { pageParam: number }) =>
+            fetchAuthorPosts(input.authorId, pageParam),
+          initialPageParam: 1,
+          getNextPageParam: (
+            _lastPage: Array<string>,
+            allPages: Array<Array<string>>,
+          ) => allPages.length + 1,
         }),
         viewerQuery: () => ({
           queryKey: [...key, 'viewer'],
@@ -604,7 +612,7 @@ describe('query handles', () => {
       await vi.advanceTimersByTimeAsync(10)
       const handles = await promise
 
-      expect(fetchAuthorPosts).toHaveBeenCalledWith('a')
+      expect(fetchAuthorPosts).toHaveBeenCalledWith('a', 1)
       expect(handles.authorPosts).toStrictEqual({
         queryKey: authorPostsQuery({ authorId: 'a' }).queryKey,
         input: { authorId: 'a' },
@@ -613,6 +621,9 @@ describe('query handles', () => {
         queryClient.getQueryState(viewerQuery().queryKey)?.fetchStatus,
       ).toBe('fetching')
       await vi.advanceTimersByTimeAsync(20)
+      expect(
+        queryClient.getQueryData(authorPostsQuery({ authorId: 'a' }).queryKey),
+      ).toStrictEqual({ pages: [['more by a, page 1']], pageParams: [1] })
     })
   })
 

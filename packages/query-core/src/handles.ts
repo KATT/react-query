@@ -377,7 +377,7 @@ export async function experimental_loadQueryHandles<
  *   const authorPosts = experimental_waterfallHandle(authorPostsQuery, {
  *     authorId: post.authorId,
  *   })
- *   const { data } = useQuery(experimental_fromHandle(authorPostsQuery, authorPosts))
+ *   const { data } = useInfiniteQuery(experimental_fromHandle(authorPostsQuery, authorPosts))
  * }
  * ```
  */
@@ -408,7 +408,7 @@ export function experimental_waterfallHandle<
  *     ...input,
  *     term,
  *   }))
- *   const { data } = useQuery({
+ *   const { data } = useInfiniteQuery({
  *     ...experimental_fromHandle(searchQuery, results),
  *     placeholderData: keepPreviousData,
  *   })

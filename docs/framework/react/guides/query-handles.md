@@ -35,9 +35,12 @@ export const commentsQuery = (input: { postId: string }) =>
   })
 
 export const authorPostsQuery = (input: { authorId: string }) =>
-  queryOptions({
+  infiniteQueryOptions({
     queryKey: ['posts', 'by-author', input.authorId] as const,
-    queryFn: () => fetchPostsByAuthor(input.authorId),
+    queryFn: ({ pageParam }) =>
+      fetchPostsByAuthor({ authorId: input.authorId, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (_lastPage, allPages) => allPages.length + 1,
   })
 ```
 
@@ -164,12 +167,12 @@ function MorePosts(props: {
   const authorPosts = experimental_waterfallHandle(authorPostsQuery, {
     authorId: post.authorId,
   })
-  const { data } = useQuery(
+  const { data } = useInfiniteQuery(
     experimental_fromHandle(authorPostsQuery, authorPosts),
   )
   return (
     <ul>
-      {data?.map((p) => (
+      {data?.pages.flat().map((p) => (
         <li key={p.id}>{p.title}</li>
       ))}
     </ul>
@@ -267,11 +270,21 @@ Pass it an input:
 [//]: # 'WaterfallInput'
 
 ```tsx
+const searchQuery = (input: { term: string }) =>
+  infiniteQueryOptions({
+    queryKey: ['search', input.term] as const,
+    queryFn: ({ pageParam }) => search({ term: input.term, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (_lastPage, allPages) => allPages.length + 1,
+  })
+
 function SearchResults(props: { term: string }) {
   const results = experimental_waterfallHandle(searchQuery, {
     term: props.term,
   })
-  const { data } = useQuery(experimental_fromHandle(searchQuery, results))
+  const { data } = useInfiniteQuery(
+    experimental_fromHandle(searchQuery, results),
+  )
 }
 ```
 
@@ -296,7 +309,7 @@ function Search(props: {
       term,
     }),
   )
-  const { data } = useQuery({
+  const { data } = useInfiniteQuery({
     ...experimental_fromHandle(searchQuery, results),
     placeholderData: keepPreviousData,
   })
@@ -310,7 +323,7 @@ function Search(props: {
 
 `term` starts from the handle's input, for example a `?q=` search param the loader read, so the first render reads the query the loader started instead of searching again. While the switched input maps to the handle's own query, it returns that handle as is. That also keeps the old input when only fields outside the key change, so put everything the `queryFn` reads in the key. Page numbers and filters belong in the URL, so the loader can start them. Use `experimental_waterfallHandle` for input that changes on every keystroke, like a search term.
 
-The query starts when its reader renders, like any other `useQuery` or `useSuspenseQuery`. `useQuery` doesn't fetch during a server render, while `useSuspenseQuery` does.
+The query starts when its reader renders, like with any other query hook. `useQuery` and `useInfiniteQuery` don't fetch during a server render, while the suspense hooks do.
 
 ## Server rendering
 
