@@ -142,31 +142,29 @@ type HandleOfEntry<TEntry> =
       : DefinedQueryHandle<TFactory>
     : never
 
-/**
- * What `experimental_loadQueryHandles` resolves to.
- */
-export interface LoadedQueryHandles<
+type LoadedHandles<
   TEntries extends Record<string, QueryHandleEntry<any, any>>,
-> {
-  /**
-   * A handle for every entry, by the entry's key. Return them from the loader.
-   */
-  handles: { [TKey in keyof TEntries]: HandleOfEntry<TEntries[TKey]> }
-  /**
-   * The data of every fetch and ensure entry, by the entry's key, like `useSuspenseQuery`'s
-   * `data`.
-   */
-  data: {
-    [
-      TKey in keyof TEntries as TEntries[TKey] extends QueryHandleEntry<
-        any,
-        'fetch' | 'ensure'
-      >
-        ? TKey
-        : never
-    ]: InferQueryHandleData<TEntries[TKey]['factory']>
-  }
+> = { [TKey in keyof TEntries]: HandleOfEntry<TEntries[TKey]> }
+
+type LoadedData<TEntries extends Record<string, QueryHandleEntry<any, any>>> = {
+  [
+    TKey in keyof TEntries as TEntries[TKey] extends QueryHandleEntry<
+      any,
+      'fetch' | 'ensure'
+    >
+      ? TKey
+      : never
+  ]: InferQueryHandleData<TEntries[TKey]['factory']>
 }
+
+/**
+ * What `experimental_loadQueryHandles` resolves to: `[handles, data]`. `handles` has a handle for
+ * every entry, by the entry's key; return them from the loader. `data` has the data of every fetch
+ * and ensure entry, by the entry's key, like `useSuspenseQuery`'s `data`.
+ */
+export type LoadedQueryHandles<
+  TEntries extends Record<string, QueryHandleEntry<any, any>>,
+> = readonly [handles: LoadedHandles<TEntries>, data: LoadedData<TEntries>]
 
 /**
  * The options `experimental_fromHandle` returns: the factory's options for the handle's input.
@@ -315,15 +313,17 @@ export function experimental_ensureEntry<TFactory extends QueryHandleFactory>(
  * server component or server render passes the handles to the components that read the queries.
  *
  * It starts every entry before it waits for any. It resolves when every fetch and ensure entry
- * has data, with the handles and the data of those entries. It rejects as soon as one of them
- * fails, so a loader can redirect or show an error page. Prefetch entries never make it reject.
+ * has data, with the tuple `[handles, data]`: a handle for every entry, and the data of the fetch
+ * and ensure entries. It rejects as soon as one of them fails, so a loader can redirect or show an
+ * error page. Prefetch entries never make it reject.
  * @param queryClient - The client to start the queries on.
  * @param entries - The entries, by the key the loader returns their handles under.
- * @returns A promise of the handles and the data of the fetch and ensure entries.
+ * @returns A promise of `[handles, data]`: the handles, and the data of the fetch and ensure
+ * entries.
  * @example
  * ```ts
  * // in a route loader
- * const { handles, data } = await experimental_loadQueryHandles(queryClient, {
+ * const [handles, data] = await experimental_loadQueryHandles(queryClient, {
  *   comments: experimental_prefetchEntry(commentsQuery, { postId: id }),
  *   post: experimental_ensureEntry(postQuery, { id }),
  * })
@@ -359,7 +359,7 @@ export async function experimental_loadQueryHandles<
     handles[load.key] = load.handle
     if (load.promise) data[load.key] = readData(queryClient, load.options)
   }
-  return { handles, data } as LoadedQueryHandles<TEntries>
+  return [handles, data] as unknown as LoadedQueryHandles<TEntries>
 }
 
 /**

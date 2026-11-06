@@ -65,10 +65,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
     expect(router['post.comments']).toHaveBeenCalledTimes(1)
     expect(router.feed).toHaveBeenCalledTimes(1)
     await vi.advanceTimersByTimeAsync(20)
-    const {
-      handles: { post, comments, feed },
-      data: loaded,
-    } = await promise
+    const [{ post, comments, feed }, loaded] = await promise
     expect(loaded.post).toStrictEqual({ id: '1', title: 'post 1' })
     expect(loaded.feed.pages).toHaveLength(2)
     const payload = JSON.parse(

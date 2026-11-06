@@ -57,7 +57,7 @@ A handle's type comes from its factory's key. Declare keys with `as const`: two 
 
 Each takes the factory, then the factory's input. Creating an entry starts nothing: `experimental_loadQueryHandles` starts every entry at once, before it waits for any, so the order of the entries doesn't matter.
 
-It resolves to `{ handles, data }`. `handles` has a plain `{ queryKey, input }` handle for every entry, under the entry's key; return them from the loader. `data` has the data of the fetch and ensure entries, as `useSuspenseQuery` would give it.
+It resolves to a tuple, `[handles, data]`. `handles` has a plain `{ queryKey, input }` handle for every entry, under the entry's key; return them from the loader. `data` has the data of the fetch and ensure entries, as `useSuspenseQuery` would give it. Leave `data` out when the loader doesn't need it: `const [handles] = await …`.
 
 [//]: # 'Loader'
 
@@ -70,7 +70,7 @@ import {
 
 export const Route = createFileRoute('/posts/$id')({
   loader: async ({ context: { queryClient }, params }) => {
-    const { handles } = await experimental_loadQueryHandles(queryClient, {
+    const [handles] = await experimental_loadQueryHandles(queryClient, {
       // Start the comments without waiting, and stream them in
       comments: experimental_prefetchEntry(commentsQuery, {
         postId: params.id,
@@ -113,7 +113,7 @@ The loader above ensures the post. `experimental_ensureEntry` is the handle vers
 [//]: # 'EnsureData'
 
 ```tsx
-const { handles } = await experimental_loadQueryHandles(queryClient, {
+const [handles] = await experimental_loadQueryHandles(queryClient, {
   // If we have the post loaded already, we don't want to block on a refetch.
   // Otherwise wait for it, and throw if it fails
   post: experimental_ensureEntry(postQuery, { id: params.id }),
@@ -131,7 +131,7 @@ Sometimes the loader needs the data itself, for example to throw `notFound()` wh
 [//]: # 'LoaderData'
 
 ```tsx
-const { handles, data } = await experimental_loadQueryHandles(queryClient, {
+const [handles, data] = await experimental_loadQueryHandles(queryClient, {
   comments: experimental_prefetchEntry(commentsQuery, { postId: params.id }),
   post: experimental_ensureEntry(postQuery, { id: params.id }),
 })
@@ -218,7 +218,7 @@ const second = await experimental_loadQueryHandles(queryClient, {
 })
 
 // Both start at once
-const { handles } = await experimental_loadQueryHandles(queryClient, {
+const [handles] = await experimental_loadQueryHandles(queryClient, {
   comments: experimental_prefetchEntry(commentsQuery, { postId: id }),
   post: experimental_ensureEntry(postQuery, { id }),
 })
@@ -352,7 +352,7 @@ const postQuery = (input: { id: string }) =>
   })
 
 // On the server: fetches the post, and sends it along with the page
-const { handles } = await experimental_loadQueryHandles(queryClient, {
+const [handles] = await experimental_loadQueryHandles(queryClient, {
   post: experimental_ensureEntry(postQuery, { id }),
 })
 

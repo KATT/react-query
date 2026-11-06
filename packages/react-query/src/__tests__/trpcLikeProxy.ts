@@ -188,7 +188,8 @@ export type OptionsProxy<TRouter extends AnyRouter> = {
       : never
     : never
   /**
-   * Starts the entries on the proxy's client, like `experimental_loadQueryHandles`.
+   * Starts the entries on the proxy's client, like `experimental_loadQueryHandles`, and resolves to
+   * `[handles, data]`.
    */
   $loadHandles: LoadHandles
 }

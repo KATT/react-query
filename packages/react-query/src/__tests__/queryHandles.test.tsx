@@ -58,7 +58,7 @@ describe('query handles', () => {
           postId: params.id,
         }),
       })
-    const { handles } = await loader({ id: '1' })
+    const [handles] = await loader({ id: '1' })
     const dehydrated = dehydrate(serverClient, {
       shouldDehydrateQuery: (query) =>
         defaultShouldDehydrateQuery(query) || query.state.status === 'pending',
@@ -138,7 +138,7 @@ describe('query handles', () => {
       post: experimental_fetchEntry(postQuery, { id: '1' }),
     })
     await vi.advanceTimersByTimeAsync(10)
-    const { handles } = await promise
+    const [handles] = await promise
     const dehydrated = dehydrate(serverClient)
 
     function Post(props: { post: experimental_QueryHandle<typeof postQuery> }) {

@@ -48,7 +48,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
   })
 
   it('should give fetch and ensure entries defined handles and data, and keep prefetch handles plain', async () => {
-    const { handles, data } = await trpc.$loadHandles({
+    const [handles, data] = await trpc.$loadHandles({
       post: trpc['post.byId'].$fetchEntry({ id: '1' }),
       ensured: trpc['post.byId'].$ensureEntry({ id: '1' }),
       comments: trpc['post.comments'].$prefetchEntry({ postId: '1', page: 1 }),
@@ -74,7 +74,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
   })
 
   it('should read any handle without naming its procedure', async () => {
-    const { handles } = await trpc.$loadHandles({
+    const [handles] = await trpc.$loadHandles({
       prefetched: trpc['post.byId'].$prefetchEntry({ id: '1' }),
       fetched: trpc['post.byId'].$fetchEntry({ id: '1' }),
       feed: trpc.feed.$prefetchInfiniteEntry({ limit: 2 }),
@@ -130,9 +130,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
   })
 
   it('should switch a handle with waterfallHandle', async () => {
-    const {
-      handles: { comments },
-    } = await trpc.$loadHandles({
+    const [{ comments }] = await trpc.$loadHandles({
       comments: trpc['post.comments'].$prefetchEntry({ postId: '1', page: 1 }),
     })
 
@@ -152,7 +150,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
   })
 
   it("should infer a procedure's data from its factory, the same as useSuspenseQuery", async () => {
-    const { handles } = await trpc.$loadHandles({
+    const [handles] = await trpc.$loadHandles({
       post: trpc['post.byId'].$prefetchEntry({ id: '1' }),
       feed: trpc.feed.$fetchInfiniteEntry({ limit: 2 }),
     })
