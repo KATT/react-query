@@ -54,7 +54,7 @@ describe('query handles', () => {
       comments: load.prefetch(commentsQuery, { postId: '1' }),
     }))
     await vi.advanceTimersByTimeAsync(10)
-    const { handles } = await loaded
+    const [handles] = await loaded
     const dehydrated = dehydrate(serverClient, {
       shouldDehydrateQuery: (query) =>
         defaultShouldDehydrateQuery(query) || query.state.status === 'pending',

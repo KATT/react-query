@@ -97,7 +97,7 @@ describe('query handles', () => {
       expect(fetchViewer).toHaveBeenCalledTimes(1)
       expect(fetchPost).toHaveBeenCalledTimes(1)
       await vi.advanceTimersByTimeAsync(10)
-      const { handles, data } = await promise
+      const [handles, data] = await promise
 
       expect(handles).toStrictEqual({
         viewer: { queryKey: viewerQuery().queryKey, input: undefined },
@@ -130,10 +130,10 @@ describe('query handles', () => {
       await vi.advanceTimersByTimeAsync(29)
       expect(onResolve).not.toHaveBeenCalled()
       await vi.advanceTimersByTimeAsync(1)
-      expect(onResolve).toHaveBeenCalledWith({
-        handles: expect.any(Object),
-        data: { viewer: 'viewer', post: { id: '1', authorId: 'a' } },
-      })
+      expect(onResolve).toHaveBeenCalledWith([
+        expect.any(Object),
+        { viewer: 'viewer', post: { id: '1', authorId: 'a' } },
+      ])
     })
 
     describe('load.prefetch', () => {
@@ -145,7 +145,7 @@ describe('query handles', () => {
           throw new Error('no')
         })
 
-        const { handles } = await experimental_loadQueryHandles(
+        const [handles] = await experimental_loadQueryHandles(
           queryClient,
           (load) => ({
             rejecting: load.prefetch(rejecting, { id: '1' }),
@@ -230,9 +230,7 @@ describe('query handles', () => {
         }))
         await vi.advanceTimersByTimeAsync(10)
 
-        await expect(promise).resolves.toMatchObject({
-          data: { post: '1-new' },
-        })
+        await expect(promise).resolves.toMatchObject([{}, { post: '1-new' }])
       })
 
       it('should reject when a fetched query fails, but not when a prefetched one does', async () => {
@@ -248,7 +246,7 @@ describe('query handles', () => {
           post: load.fetch(postQuery, { id: '1' }),
         }))
         await vi.advanceTimersByTimeAsync(10)
-        await expect(started).resolves.toMatchObject({ data: { post: {} } })
+        await expect(started).resolves.toMatchObject([{}, { post: {} }])
 
         await expect(
           experimental_loadQueryHandles(queryClient, (load) => ({
@@ -274,7 +272,7 @@ describe('query handles', () => {
           comments: load.fetch(commentsQuery, { postId: '1' }, { pages: 2 }),
         }))
         await vi.advanceTimersByTimeAsync(20)
-        const { handles, data } = await promise
+        const [handles, data] = await promise
 
         expect(data.comments).toStrictEqual({
           pages: [['1-1'], ['1-2']],
@@ -297,9 +295,10 @@ describe('query handles', () => {
         }))
         await vi.advanceTimersByTimeAsync(10)
 
-        await expect(promise).resolves.toMatchObject({
-          data: { post: { id: '1' } },
-        })
+        await expect(promise).resolves.toMatchObject([
+          {},
+          { post: { id: '1' } },
+        ])
         expect(fetchPost).toHaveBeenCalledTimes(1)
       })
 
@@ -312,7 +311,7 @@ describe('query handles', () => {
         const postQuery = createPostQuery(queryFn)
         queryClient.setQueryData(postQuery({ id: '1' }).queryKey, 'cached')
 
-        const { handles, data } = await experimental_loadQueryHandles(
+        const [handles, data] = await experimental_loadQueryHandles(
           queryClient,
           (load) => ({ post: load.ensure(postQuery, { id: '1' }) }),
         )
@@ -344,7 +343,7 @@ describe('query handles', () => {
         })
         queryClient.setQueryData(key, { pages: [1], pageParams: [1] })
 
-        const { data } = await experimental_loadQueryHandles(
+        const [, data] = await experimental_loadQueryHandles(
           queryClient,
           (load) => ({ feed: load.ensure(feedQuery, undefined, { pages: 2 }) }),
         )
@@ -368,7 +367,7 @@ describe('query handles', () => {
         queryClient.setQueryData(postQuery({ id: '1' }).queryKey, 'cached')
         vi.advanceTimersByTime(1000)
 
-        const { handles } = await experimental_loadQueryHandles(
+        const [handles] = await experimental_loadQueryHandles(
           queryClient,
           (load) => ({ post: load.ensure(postQuery, { id: '1' }) }),
         )
@@ -394,7 +393,7 @@ describe('query handles', () => {
           select: (post: { id: string; title: string }) => post.title,
         })
 
-        const { data } = await experimental_loadQueryHandles(
+        const [, data] = await experimental_loadQueryHandles(
           queryClient,
           (load) => ({ post: load.fetch(postQuery, { id: '1' }) }),
         )
@@ -412,7 +411,7 @@ describe('query handles', () => {
             `custom:${queryKey.join('/')}`,
         })
 
-        const { data } = await experimental_loadQueryHandles(
+        const [, data] = await experimental_loadQueryHandles(
           queryClient,
           (load) => ({ post: load.fetch(postQuery, { id: '1' }) }),
         )
@@ -426,7 +425,7 @@ describe('query handles', () => {
         class NotFoundError extends Error {}
         const { viewerQuery, postQuery } = createQueries()
         const loader = async (params: { id: string }) => {
-          const { handles, data } = await experimental_loadQueryHandles(
+          const [handles, data] = await experimental_loadQueryHandles(
             queryClient,
             (load) => ({
               viewer: load.prefetch(viewerQuery),
@@ -480,7 +479,7 @@ describe('query handles', () => {
         await vi.advanceTimersByTimeAsync(10)
         expect(fetchAuthorPosts).toHaveBeenCalledWith('a')
         await vi.advanceTimersByTimeAsync(10)
-        const { handles, data } = await promise
+        const [handles, data] = await promise
 
         expect(handles.authorPosts).toStrictEqual({
           queryKey: authorPostsQuery({ authorId: 'a' }).queryKey,
@@ -511,7 +510,7 @@ describe('query handles', () => {
           }
         })
         await vi.advanceTimersByTimeAsync(10)
-        const { handles, data } = await promise
+        const [handles, data] = await promise
 
         expect(handles.authorPosts).toBeNull()
         expect(data.authorPosts).toBeNull()
@@ -572,7 +571,7 @@ describe('query handles', () => {
           'start queries only while its callback runs',
         )
         expect(fetchPost).not.toHaveBeenCalled()
-        await expect(promise).resolves.toStrictEqual({ handles: {}, data: {} })
+        await expect(promise).resolves.toStrictEqual([{}, {}])
       })
 
       it('should reject a query from another call, or a prefetched query as a parent', async () => {
@@ -679,7 +678,7 @@ describe('query handles', () => {
       using _timers = fakeTimers()
       using queryClient = clearOnDispose(new QueryClient())
       const postQuery = createPostQuery()
-      const { handles } = await experimental_loadQueryHandles(
+      const [handles] = await experimental_loadQueryHandles(
         queryClient,
         (load) => ({ post: load.prefetch(postQuery, { id: '1' }) }),
       )
@@ -701,7 +700,7 @@ describe('query handles', () => {
         post: load.fetch(postQuery, { id: '1' }),
       }))
       await vi.advanceTimersByTimeAsync(10)
-      const { handles } = await promise
+      const [handles] = await promise
 
       const options = experimental_fromHandle(postQuery, handles.post)
 
@@ -717,7 +716,7 @@ describe('query handles', () => {
         post: load.fetch(postQuery, { id: '1' }),
       }))
       await vi.advanceTimersByTimeAsync(10)
-      const { handles } = await promise
+      const [handles] = await promise
       const options = {
         ...experimental_fromHandle(postQuery, handles.post),
         enabled: false,

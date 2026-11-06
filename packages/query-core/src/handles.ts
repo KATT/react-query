@@ -205,26 +205,30 @@ type DependentEntry<TResult> = [Extract<TResult, AnyQueryHandleEntry>] extends [
   : never
 
 /**
- * What `experimental_loadQueryHandles` resolves to.
+ * A handle for every entry, by the keys the callback returned. Return them from a loader.
  */
-export interface LoadedQueryHandles<
-  TEntries extends Record<string, AnyQueryHandleEntry>,
-> {
-  /**
-   * A handle for every entry, by the keys the callback returned. Return them from a loader.
-   */
-  handles: { [TKey in keyof TEntries]: EntryHandle<TEntries[TKey]> }
-  /**
-   * The data of every entry the load waited for, like `useSuspenseQuery`'s `data`.
-   */
-  data: {
-    [
-      TKey in keyof TEntries as TEntries[TKey] extends WaitedQueryHandleEntry
-        ? TKey
-        : never
-    ]: EntryData<TEntries[TKey]>
-  }
+type LoadedHandles<TEntries extends Record<string, AnyQueryHandleEntry>> = {
+  [TKey in keyof TEntries]: EntryHandle<TEntries[TKey]>
 }
+
+/**
+ * The data of every entry the load waited for, like `useSuspenseQuery`'s `data`.
+ */
+type LoadedData<TEntries extends Record<string, AnyQueryHandleEntry>> = {
+  [
+    TKey in keyof TEntries as TEntries[TKey] extends WaitedQueryHandleEntry
+      ? TKey
+      : never
+  ]: EntryData<TEntries[TKey]>
+}
+
+/**
+ * What `experimental_loadQueryHandles` resolves to: the handles of every entry, then the data of
+ * the entries the load waited for.
+ */
+export type LoadedQueryHandles<
+  TEntries extends Record<string, AnyQueryHandleEntry>,
+> = readonly [handles: LoadedHandles<TEntries>, data: LoadedData<TEntries>]
 
 /**
  * Starts the queries of one `experimental_loadQueryHandles` call. It works only while a callback
@@ -335,11 +339,11 @@ function isThenable(value: unknown): boolean {
  * redirect or show an error page.
  * @param queryClient - The client to start the queries on.
  * @param callback - Starts the queries with `load` and returns them by name.
- * @returns A promise of the handles, and of the data of the queries it waited for.
+ * @returns A promise of a tuple: the handles, then the data of the queries it waited for.
  * @example
  * ```ts
  * // in a route loader
- * const { handles, data } = await experimental_loadQueryHandles(queryClient, (load) => ({
+ * const [handles, data] = await experimental_loadQueryHandles(queryClient, (load) => ({
  *   // Uses a cached post, even a stale one, and waits only when there is none
  *   post: load.ensure(postQuery, { id: params.id }),
  *   // Doesn't wait
@@ -477,7 +481,7 @@ export async function experimental_loadQueryHandles<
     handles[key] = settled.handle
     if (settled.hasData) data[key] = settled.data
   }
-  return { handles, data } as LoadedQueryHandles<TEntries>
+  return [handles, data] as LoadedQueryHandles<TEntries>
 }
 
 /**

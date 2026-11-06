@@ -112,7 +112,7 @@ describe('query handles', () => {
           queryFn: () => Promise.resolve([input?.page ?? 1]),
         })
 
-      const { handles } = await experimental_loadQueryHandles(
+      const [handles] = await experimental_loadQueryHandles(
         queryClient,
         (load) => ({
           first: load.prefetch(listQuery),
@@ -138,7 +138,7 @@ describe('query handles', () => {
           queryFn: () => Promise.resolve(input.id),
         })
 
-      const { handles } = await experimental_loadQueryHandles(
+      const [handles] = await experimental_loadQueryHandles(
         queryClient,
         (load) => ({ page: load.prefetch(pageQuery, { id: '1' }) }),
       )
@@ -149,7 +149,7 @@ describe('query handles', () => {
     })
 
     it('should type a plain handle per query and data per fetched or ensured query', async () => {
-      const { handles, data } = await experimental_loadQueryHandles(
+      const [handles, data] = await experimental_loadQueryHandles(
         queryClient,
         (load) => ({
           viewer: load.prefetch(viewerQuery),
@@ -178,6 +178,28 @@ describe('query handles', () => {
       assertType(data.viewer)
     })
 
+    it('should resolve to a readonly tuple of handles and data', async () => {
+      const loaded = await experimental_loadQueryHandles(
+        queryClient,
+        (load) => ({
+          viewer: load.prefetch(viewerQuery),
+          post: load.fetch(postQuery, { id: '1' }),
+        }),
+      )
+
+      expectTypeOf(loaded).toEqualTypeOf<
+        readonly [
+          handles: {
+            viewer: experimental_QueryHandle<typeof viewerQuery>
+            post: experimental_QueryHandle<typeof postQuery>
+          },
+          data: { post: Post },
+        ]
+      >()
+      // @ts-expect-error the tuple is readonly
+      loaded[0] = loaded[0]
+    })
+
     it("should type data from a factory's select", async () => {
       const postTitleQuery = (input: { id: string }) =>
         queryOptions({
@@ -187,7 +209,7 @@ describe('query handles', () => {
           select: (post) => post.title,
         })
 
-      const { handles, data } = await experimental_loadQueryHandles(
+      const [handles, data] = await experimental_loadQueryHandles(
         queryClient,
         (load) => ({ title: load.fetch(postTitleQuery, { id: '1' }) }),
       )
@@ -225,7 +247,7 @@ describe('query handles', () => {
           queryFn: () => Promise.resolve([{ id: '2' }]),
         })
 
-      const { handles, data } = await experimental_loadQueryHandles(
+      const [handles, data] = await experimental_loadQueryHandles(
         queryClient,
         (load) => {
           const post = load.fetch(authoredPostQuery, { id: '1' })
@@ -271,7 +293,7 @@ describe('query handles', () => {
 
   describe('experimental_fromHandle', () => {
     it('should type useQuery data as possibly undefined for every handle', async () => {
-      const { handles } = await experimental_loadQueryHandles(
+      const [handles] = await experimental_loadQueryHandles(
         queryClient,
         (load) => ({
           prefetched: load.prefetch(postQuery, { id: '1' }),
@@ -296,7 +318,7 @@ describe('query handles', () => {
     })
 
     it('should type useSuspenseQuery data as defined for every handle', async () => {
-      const { handles } = await experimental_loadQueryHandles(
+      const [handles] = await experimental_loadQueryHandles(
         queryClient,
         (load) => ({
           prefetched: load.prefetch(postQuery, { id: '1' }),

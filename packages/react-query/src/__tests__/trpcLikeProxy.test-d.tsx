@@ -71,7 +71,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
   })
 
   it('should type handles and the data of fetched procedures', async () => {
-    const { handles, data } = await loadHandles()
+    const [handles, data] = await loadHandles()
 
     expectTypeOf(handles.post).toEqualTypeOf<
       experimental_QueryHandle<TRPC['post.byId']['queryOptions']>
@@ -89,7 +89,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
   })
 
   it('should read any handle without naming its procedure', async () => {
-    const { handles } = await loadHandles()
+    const [handles] = await loadHandles()
 
     expectTypeOf(
       useSuspenseQuery(trpc.$fromHandle(handles.post)).data,
@@ -106,7 +106,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
   })
 
   it('should type select from the procedure when read-site options are spread', async () => {
-    const { handles } = await loadHandles()
+    const [handles] = await loadHandles()
 
     const { data } = useSuspenseQuery({
       ...trpc.$fromHandle(handles.post),
@@ -120,7 +120,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
   })
 
   it('should type handle props from the procedure', async () => {
-    const { handles } = await loadHandles()
+    const [handles] = await loadHandles()
     const props = {} as {
       post: experimental_QueryHandle<TRPC['post.byId']['queryOptions']>
     }
@@ -148,7 +148,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
   })
 
   it('should switch a handle with waterfallHandle', async () => {
-    const { handles } = await loadHandles()
+    const [handles] = await loadHandles()
 
     const next = experimental_waterfallHandle(
       trpc['post.comments'].queryOptions,
@@ -166,7 +166,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
   })
 
   it("should infer a procedure's data from its factory, the same as useSuspenseQuery", async () => {
-    const { handles } = await loadHandles()
+    const [handles] = await loadHandles()
 
     expectTypeOf<
       experimental_InferQueryHandleData<TRPC['post.byId']['queryOptions']>
@@ -185,7 +185,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
   })
 
   it("should pass a dependent procedure its parent's data", async () => {
-    const { handles, data } = await trpc.$loadHandles((load) => {
+    const [handles, data] = await trpc.$loadHandles((load) => {
       const post = load.fetch(trpc['post.byId'].queryOptions, { id: '1' })
       return {
         post,

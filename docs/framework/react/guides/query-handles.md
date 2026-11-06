@@ -56,7 +56,7 @@ import { experimental_loadQueryHandles } from '@tanstack/react-query'
 // The loader gets queryClient from createRouter({ routeTree, context: { queryClient } })
 export const Route = createFileRoute('/posts/$id')({
   loader: async ({ context: { queryClient }, params }) => {
-    const { handles, data } = await experimental_loadQueryHandles(
+    const [handles, data] = await experimental_loadQueryHandles(
       queryClient,
       (load) => ({
         // Uses a cached post, even a stale one, and waits only when there is none
@@ -99,7 +99,7 @@ The names follow the `QueryClient` methods that [`queryClient.query` replaces](.
 
 Every query starts before anything waits. The callback can't be async, and `load` throws once the callback returns, so you can't start a query after an `await`. The promise resolves when every query the load waits for has data, and rejects as soon as one of them fails, so a loader can redirect or show an error page.
 
-It resolves to two objects:
+It resolves to a pair, `[handles, data]`, so you name both parts:
 
 - `handles`: a handle for every query, by name. Return them from the loader, or pass them as props.
 - `data`: the data of every query from `load.fetch` and `load.ensure`, by name, like `useSuspenseQuery`'s `data`. Queries from `load.prefetch` have no data yet, so `data` leaves them out.
@@ -174,12 +174,9 @@ To start it in the loader instead, use `load.after`. It starts the dependent que
 ```tsx
 // Every query in the load waits for the session
 const session = await getSession()
-const { handles } = await experimental_loadQueryHandles(
-  queryClient,
-  (load) => ({
-    comments: load.prefetch(commentsQuery, { postId: params.id }),
-  }),
-)
+const [handles] = await experimental_loadQueryHandles(queryClient, (load) => ({
+  comments: load.prefetch(commentsQuery, { postId: params.id }),
+}))
 ```
 
 [//]: # 'AwaitBefore'
@@ -348,7 +345,7 @@ A Server Component can then ensure the post and stream the comments:
 // app/posts/[id]/page.tsx
 export default async function PostPage({ params }) {
   const queryClient = getQueryClient()
-  const { handles, data } = await experimental_loadQueryHandles(
+  const [handles, data] = await experimental_loadQueryHandles(
     queryClient,
     (load) => ({
       post: load.ensure(postQuery, { id: params.id }),
@@ -399,12 +396,9 @@ const postQuery = (input: { id: string }) =>
   })
 
 // On the server: fetches the post, and sends it along with the page
-const { handles } = await experimental_loadQueryHandles(
-  queryClient,
-  (load) => ({
-    post: load.ensure(postQuery, { id }),
-  }),
-)
+const [handles] = await experimental_loadQueryHandles(queryClient, (load) => ({
+  post: load.ensure(postQuery, { id }),
+}))
 
 // In the browser: the post is already stale, so this fetches it again on mount
 const { data } = useQuery(experimental_fromHandle(postQuery, handles.post))

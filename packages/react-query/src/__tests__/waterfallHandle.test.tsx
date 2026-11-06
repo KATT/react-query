@@ -66,11 +66,12 @@ describe('experimental_waterfallHandle', () => {
     using _timers = fakeTimers()
     using queryClient = clearOnDispose(new QueryClient())
     const { postsQuery, queryFn } = createPostsQuery()
-    const {
-      handles: { posts: loaderHandle },
-    } = await experimental_loadQueryHandles(queryClient, (load) => ({
-      posts: load.prefetch(postsQuery, { page: 1 }),
-    }))
+    const [{ posts: loaderHandle }] = await experimental_loadQueryHandles(
+      queryClient,
+      (load) => ({
+        posts: load.prefetch(postsQuery, { page: 1 }),
+      }),
+    )
     const handles: Array<experimental_QueryHandle<typeof postsQuery>> = []
 
     function Posts(props: {
@@ -123,7 +124,7 @@ describe('experimental_waterfallHandle', () => {
       posts: load.fetch(postsQuery, { page: 1 }),
     }))
     await vi.advanceTimersByTimeAsync(10)
-    const handle = (await promise).handles.posts
+    const handle = (await promise)[0].posts
     const statuses: Array<string> = []
 
     function Posts() {

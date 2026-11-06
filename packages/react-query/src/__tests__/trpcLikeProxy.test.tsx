@@ -73,13 +73,12 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
       ),
     }))
     await vi.advanceTimersByTimeAsync(20)
-    const loadedHandles = await loaded
-    expect(loadedHandles.data.post).toStrictEqual({
+    const [{ post, comments, feed }, loadedData] = await loaded
+    expect(loadedData.post).toStrictEqual({
       id: '1',
       title: 'post 1',
       authorId: 'a',
     })
-    const { post, comments, feed } = loadedHandles.handles
     const payload = JSON.parse(
       JSON.stringify({
         state: dehydrate(serverClient),
@@ -185,7 +184,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
     expect(router.feed).toHaveBeenCalledTimes(1)
     expect(router['post.byAuthor']).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(10)
-    const { handles, data } = await promise
+    const [handles, data] = await promise
 
     expect(router['post.byAuthor']).toHaveBeenCalledWith({ authorId: 'a' })
     expect(data.post).toStrictEqual({
