@@ -15,13 +15,15 @@ import type {
 } from '..'
 import type { OptionsProxy } from './trpcLikeProxy'
 
-type Post = { id: string; title: string }
+type Post = { id: string; title: string; authorId: string }
 type Comment = { id: string; text: string }
 type FeedPage = { items: Array<string>; nextCursor: number | null }
 
 const router = {
   'post.byId': (_input: { id: string }): Promise<Post> =>
-    Promise.resolve({ id: '1', title: '' }),
+    Promise.resolve({ id: '1', title: '', authorId: 'a' }),
+  'post.byAuthor': (_input: { authorId: string }): Promise<Array<Post>> =>
+    Promise.resolve([]),
   'post.comments': (_input: {
     postId: string
     page: number
@@ -194,11 +196,10 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
       const post = q.wait(trpc['post.byId'].queryOptions, { id: '1' })
       return {
         post,
-        comments: q.after(post, (value) => {
+        authorPosts: q.after(post, (value) => {
           expectTypeOf(value).toEqualTypeOf<Post>()
-          return q.start(trpc['post.comments'].queryOptions, {
-            postId: value.id,
-            page: 1,
+          return q.start(trpc['post.byAuthor'].queryOptions, {
+            authorId: value.authorId,
           })
         }),
         feed: q.ensure(trpc.feed.infiniteQueryOptions, { limit: 10 }),
@@ -207,13 +208,13 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
 
     expectTypeOf(data.post).toEqualTypeOf<Post>()
     expectTypeOf(data.feed.pages).toEqualTypeOf<Array<FeedPage>>()
-    expectTypeOf(data).not.toHaveProperty('comments')
+    expectTypeOf(data).not.toHaveProperty('authorPosts')
     expectTypeOf(
-      trpc.$fromHandle(handles.comments).queryKey[0],
-    ).toEqualTypeOf<'post.comments'>()
+      trpc.$fromHandle(handles.authorPosts).queryKey[0],
+    ).toEqualTypeOf<'post.byAuthor'>()
     expectTypeOf(trpc.$getQueryHandleData(handles.post)).toEqualTypeOf<Post>()
-    assertType<experimental_QueryHandle<TRPC['post.comments']['queryOptions']>>(
-      handles.comments,
+    assertType<experimental_QueryHandle<TRPC['post.byAuthor']['queryOptions']>>(
+      handles.authorPosts,
     )
   })
 })

@@ -20,14 +20,21 @@ import { createOptionsProxy } from './trpcLikeProxy'
 import type { experimental_QueryHandle } from '..'
 import type { OptionsProxy } from './trpcLikeProxy'
 
-type Post = { id: string; title: string }
+type Post = { id: string; title: string; authorId: string }
 type FeedPage = { items: Array<string>; nextCursor: number | null }
 
 describe('a tRPC-like proxy on the public handle APIs', () => {
   const createRouter = () => ({
     'post.byId': vi.fn<(input: { id: string }) => Promise<Post>>((input) =>
-      sleep(10).then(() => ({ id: input.id, title: `post ${input.id}` })),
+      sleep(10).then(() => ({
+        id: input.id,
+        title: `post ${input.id}`,
+        authorId: 'a',
+      })),
     ),
+    'post.byAuthor': vi.fn<
+      (input: { authorId: string }) => Promise<Array<Post>>
+    >(() => sleep(10).then(() => [])),
     'post.comments': vi.fn<
       (input: { postId: string; page: number }) => Promise<Array<string>>
     >((input) =>
@@ -63,6 +70,7 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
     expect(serverTrpc.$getQueryHandleData(post)).toStrictEqual({
       id: '1',
       title: 'post 1',
+      authorId: 'a',
     })
     const comments = serverTrpc['post.comments'].$queryHandle({
       postId: post.input.id,
@@ -162,10 +170,9 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
       const post = q.wait(trpc['post.byId'].queryOptions, { id: '1' })
       return {
         post,
-        comments: q.after(post, (value) =>
-          q.start(trpc['post.comments'].queryOptions, {
-            postId: value.id,
-            page: 1,
+        authorPosts: q.after(post, (value) =>
+          q.start(trpc['post.byAuthor'].queryOptions, {
+            authorId: value.authorId,
           }),
         ),
         feed: q.wait(trpc.feed.infiniteQueryOptions, { limit: 10 }),
@@ -174,20 +181,21 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
 
     expect(router['post.byId']).toHaveBeenCalledTimes(1)
     expect(router.feed).toHaveBeenCalledTimes(1)
-    expect(router['post.comments']).not.toHaveBeenCalled()
+    expect(router['post.byAuthor']).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(10)
     const { handles, data } = await promise
 
-    expect(router['post.comments']).toHaveBeenCalledWith({
-      postId: '1',
-      page: 1,
+    expect(router['post.byAuthor']).toHaveBeenCalledWith({ authorId: 'a' })
+    expect(data.post).toStrictEqual({
+      id: '1',
+      title: 'post 1',
+      authorId: 'a',
     })
-    expect(data.post).toStrictEqual({ id: '1', title: 'post 1' })
     expect(data.feed.pages).toStrictEqual([
       { items: ['item 0'], nextCursor: 10 },
     ])
-    expect(trpc.$fromHandle(handles.comments).queryKey).toStrictEqual(
-      trpc['post.comments'].queryOptions({ postId: '1', page: 1 }).queryKey,
+    expect(trpc.$fromHandle(handles.authorPosts).queryKey).toStrictEqual(
+      trpc['post.byAuthor'].queryOptions({ authorId: 'a' }).queryKey,
     )
     await vi.advanceTimersByTimeAsync(10)
   })

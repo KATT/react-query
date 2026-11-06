@@ -35,6 +35,12 @@ const userQuery = (input: { id: string }) =>
     queryFn: () => Promise.resolve({ name: input.id }),
   })
 
+const authorPostsQuery = (input: { authorId: string }) =>
+  queryOptions({
+    queryKey: ['posts', 'by-author', input.authorId] as const,
+    queryFn: (): Promise<Array<Post>> => Promise.resolve([]),
+  })
+
 const feedQuery = (input: { size: number }) =>
   infiniteQueryOptions({
     queryKey: ['feed', input.size] as const,
@@ -116,7 +122,11 @@ describe('experimental_loadQueryHandles', () => {
               ? q.wait(userQuery, { id: value.authorId })
               : null
           }),
-          comments: q.after(post, () => q.start(viewerQuery)),
+          authorPosts: q.after(post, (value) =>
+            value?.authorId
+              ? q.start(authorPostsQuery, { authorId: value.authorId })
+              : null,
+          ),
         }
       },
     )
@@ -125,10 +135,10 @@ describe('experimental_loadQueryHandles', () => {
       typeof userQuery
     > | null>()
     expectTypeOf(data.author).toEqualTypeOf<{ name: string } | null>()
-    expectTypeOf(handles.comments).toEqualTypeOf<
-      experimental_QueryHandle<typeof viewerQuery>
-    >()
-    expectTypeOf(data).not.toHaveProperty('comments')
+    expectTypeOf(handles.authorPosts).toEqualTypeOf<experimental_QueryHandle<
+      typeof authorPostsQuery
+    > | null>()
+    expectTypeOf(data).not.toHaveProperty('authorPosts')
   })
 
   it('should only take an entry that waits as a parent', () => {
