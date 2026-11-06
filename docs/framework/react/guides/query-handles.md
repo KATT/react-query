@@ -292,7 +292,7 @@ You can also switch a handle a loader passed down to a new input. A search page'
 [//]: # 'WaterfallSwitch'
 
 ```tsx
-function Search(props: {
+function SearchBox(props: {
   results: experimental_QueryHandle<typeof searchQuery>
 }) {
   const [term, setTerm] = React.useState(props.results.input.term)

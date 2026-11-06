@@ -492,6 +492,7 @@ export async function experimental_loadQueryHandles<
  * ```tsx
  * function MorePosts(props: { post: experimental_QueryHandle<typeof postQuery> }) {
  *   const { data: post } = useSuspenseQuery(experimental_fromHandle(postQuery, props.post))
+ *   // The author's posts can't start until the post's data arrives
  *   const authorPosts = experimental_waterfallHandle(authorPostsQuery, {
  *     authorId: post.authorId,
  *   })
@@ -505,8 +506,8 @@ export function experimental_waterfallHandle<
 /**
  * Switches a handle, like one a loader passed down, to a new input, like a search term the user
  * types, and returns the handle for that input. It doesn't start the query: the component that
- * reads the handle does, when it renders, which makes it a request waterfall. Inputs that belong
- * in the URL, like a page number, should go to the loader instead.
+ * reads the handle does, when it renders, which makes it a request waterfall. Prefer passing the
+ * new input to the loader through the URL.
  *
  * While the new input maps to the handle's own query, it returns the handle as is, so the first
  * render reads what the loader started. That also keeps the old input when only fields outside the
@@ -518,7 +519,7 @@ export function experimental_waterfallHandle<
  * input.
  * @example
  * ```tsx
- * function Search(props: { results: experimental_QueryHandle<typeof searchQuery> }) {
+ * function SearchBox(props: { results: experimental_QueryHandle<typeof searchQuery> }) {
  *   // Start from the loader's term, so the first render reads the query it started
  *   const [term, setTerm] = React.useState(props.results.input.term)
  *   const results = experimental_waterfallHandle(searchQuery, props.results, (input) => ({
