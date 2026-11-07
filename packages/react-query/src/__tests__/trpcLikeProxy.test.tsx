@@ -10,7 +10,6 @@ import {
 import {
   QueryClient,
   dehydrate,
-  experimental_waterfallHandle,
   hydrate,
   useSuspenseInfiniteQuery,
   useSuspenseQuery,
@@ -100,12 +99,9 @@ describe('a tRPC-like proxy on the public handle APIs', () => {
       comments: experimental_QueryHandle<TRPC['post.comments']['queryOptions']>
     }) {
       const [page, setPage] = React.useState(1)
-      const handle = experimental_waterfallHandle(
-        trpc['post.comments'].queryOptions,
-        props.comments,
-        (input) => ({ ...input, page }),
+      const { data } = useSuspenseQuery(
+        trpc['post.comments'].queryOptions({ ...props.comments.input, page }),
       )
-      const { data } = useSuspenseQuery(trpc.$fromHandle(handle))
       return (
         <div>
           <div>comments: {data.join(', ')}</div>

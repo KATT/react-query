@@ -18,7 +18,10 @@ import {
   experimental_loadQueryHandles,
   experimental_prefetchEntry,
   infiniteQueryOptions,
+  keepPreviousData,
   queryOptions,
+  useInfiniteQuery,
+  useQuery,
   useSuspenseInfiniteQuery,
   useSuspenseQuery,
 } from '..'
@@ -162,5 +165,95 @@ describe('query handles', () => {
 
     expect(rendered.getByText('data: post 1')).toBeInTheDocument()
     expect(fetchPost).toHaveBeenCalledTimes(1)
+  })
+
+  it('should give useQuery the cached data of a fetched handle on the first render', async () => {
+    using _timers = fakeTimers()
+    using queryClient = clearOnDispose(new QueryClient())
+    const key = createKey()
+    const postQuery = (input: { id: string }) =>
+      queryOptions({
+        queryKey: [...key, input.id],
+        queryFn: () => sleep(10).then(() => `post ${input.id}`),
+      })
+    const promise = experimental_loadQueryHandles(queryClient, {
+      post: experimental_fetchEntry(postQuery, { id: '1' }),
+    })
+    await vi.advanceTimersByTimeAsync(10)
+    const [handles] = await promise
+    const statuses: Array<string> = []
+
+    function Post() {
+      const { data, status } = useQuery(
+        experimental_fromHandle(postQuery, handles.post),
+      )
+      statuses.push(status)
+      return <div>data: {data}</div>
+    }
+
+    using rendered = unmountOnDispose(renderWithClient(queryClient, <Post />))
+
+    expect(rendered.getByText('data: post 1')).toBeInTheDocument()
+    expect(statuses[0]).toBe('success')
+  })
+
+  it("should read the loader's query from the factory with the handle's input", async () => {
+    using _timers = fakeTimers()
+    using queryClient = clearOnDispose(new QueryClient())
+    const key = createKey()
+    const search = vi.fn<(term: string, page: number) => Promise<string>>(
+      (term, page) => sleep(10).then(() => `${term} ${page}`),
+    )
+    const searchQuery = (input: { term: string }) =>
+      infiniteQueryOptions({
+        queryKey: [...key, input.term],
+        queryFn: ({ pageParam }) => search(input.term, pageParam),
+        initialPageParam: 1,
+        getNextPageParam: (_lastPage, allPages) => allPages.length + 1,
+        staleTime: 60 * 1000,
+      })
+    const promise = experimental_loadQueryHandles(queryClient, {
+      results: experimental_fetchEntry(searchQuery, { term: 'a' }),
+    })
+    await vi.advanceTimersByTimeAsync(10)
+    const [handles] = await promise
+
+    function SearchBox(props: {
+      results: experimental_QueryHandle<typeof searchQuery>
+    }) {
+      const [term, setTerm] = React.useState(props.results.input.term)
+      const { data, isPlaceholderData } = useInfiniteQuery({
+        ...searchQuery({ term }),
+        placeholderData: keepPreviousData,
+      })
+      return (
+        <div>
+          <input
+            aria-label="term"
+            value={term}
+            onChange={(event) => setTerm(event.target.value)}
+          />
+          <div>results: {data?.pages.join(', ')}</div>
+          <div>{isPlaceholderData ? 'previous' : 'current'}</div>
+        </div>
+      )
+    }
+
+    using rendered = unmountOnDispose(
+      renderWithClient(queryClient, <SearchBox results={handles.results} />),
+    )
+
+    expect(rendered.getByText('results: a 1')).toBeInTheDocument()
+    expect(search).toHaveBeenCalledTimes(1)
+
+    fireEvent.change(rendered.getByLabelText('term'), {
+      target: { value: 'ab' },
+    })
+    expect(rendered.getByText('results: a 1')).toBeInTheDocument()
+    expect(rendered.getByText('previous')).toBeInTheDocument()
+    await act(() => vi.advanceTimersByTimeAsync(11))
+    expect(rendered.getByText('results: ab 1')).toBeInTheDocument()
+    expect(rendered.getByText('current')).toBeInTheDocument()
+    expect(search).toHaveBeenCalledTimes(2)
   })
 })

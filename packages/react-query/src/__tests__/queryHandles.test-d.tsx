@@ -6,7 +6,6 @@ import {
   experimental_fromHandle,
   experimental_loadQueryHandles,
   experimental_prefetchEntry,
-  experimental_waterfallHandle,
   infiniteQueryOptions,
   keepPreviousData,
   queryOptions,
@@ -106,9 +105,6 @@ describe('query handles', () => {
           { staleTime: 60_000 },
         ),
       )
-      const opts = { staleTime: 60_000 }
-      // @ts-expect-error the handle only carries the input
-      assertType(experimental_waterfallHandle(optionsQuery, { id: '1' }, opts))
     })
 
     it('should take an optional input', async () => {
@@ -255,7 +251,7 @@ describe('query handles', () => {
       assertType(
         experimental_loadQueryHandles(queryClient, {
           // @ts-expect-error a handle is not an entry
-          post: experimental_waterfallHandle(postQuery, { id: '1' }),
+          post: {} as experimental_QueryHandle<typeof postQuery>,
         }),
       )
       assertType(
@@ -274,7 +270,6 @@ describe('query handles', () => {
         fetched: experimental_fetchEntry(postQuery, { id: '1' }),
         ensured: experimental_ensureEntry(postQuery, { id: '1' }),
       })
-      const waterfall = experimental_waterfallHandle(postQuery, { id: '1' })
 
       expectTypeOf(
         useQuery(experimental_fromHandle(postQuery, handles.prefetched)).data,
@@ -285,9 +280,6 @@ describe('query handles', () => {
       expectTypeOf(
         useQuery(experimental_fromHandle(postQuery, handles.ensured)).data,
       ).toEqualTypeOf<Post | undefined>()
-      expectTypeOf(
-        useQuery(experimental_fromHandle(postQuery, waterfall)).data,
-      ).toEqualTypeOf<Post | undefined>()
     })
 
     it('should type useSuspenseQuery data as defined for every handle', async () => {
@@ -296,7 +288,6 @@ describe('query handles', () => {
         fetched: experimental_fetchEntry(postQuery, { id: '1' }),
         ensured: experimental_ensureEntry(postQuery, { id: '1' }),
       })
-      const waterfall = experimental_waterfallHandle(postQuery, { id: '1' })
 
       expectTypeOf(
         useSuspenseQuery(experimental_fromHandle(postQuery, handles.prefetched))
@@ -309,9 +300,6 @@ describe('query handles', () => {
       expectTypeOf(
         useSuspenseQuery(experimental_fromHandle(postQuery, handles.ensured))
           .data,
-      ).toEqualTypeOf<Post>()
-      expectTypeOf(
-        useSuspenseQuery(experimental_fromHandle(postQuery, waterfall)).data,
       ).toEqualTypeOf<Post>()
     })
 
@@ -333,9 +321,7 @@ describe('query handles', () => {
     })
 
     it('should accept keepPreviousData as placeholderData', () => {
-      const handle = experimental_waterfallHandle(postQuery, {
-        id: '1',
-      })
+      const handle = {} as experimental_QueryHandle<typeof postQuery>
 
       const { data } = useQuery({
         ...experimental_fromHandle(postQuery, handle),
@@ -345,16 +331,11 @@ describe('query handles', () => {
       expectTypeOf(data).toEqualTypeOf<Post | undefined>()
     })
 
-    it('should accept keepPreviousData as placeholderData for a switched infinite handle', () => {
-      const loaderHandle = experimental_waterfallHandle(feedQuery, { size: 1 })
-      const handle = experimental_waterfallHandle(
-        feedQuery,
-        loaderHandle,
-        (input) => ({ ...input, size: 2 }),
-      )
+    it("should accept keepPreviousData for an infinite factory called with a handle's input", () => {
+      const handle = {} as experimental_QueryHandle<typeof feedQuery>
 
       const { data } = useInfiniteQuery({
-        ...experimental_fromHandle(feedQuery, handle),
+        ...feedQuery({ ...handle.input, size: 2 }),
         placeholderData: keepPreviousData,
       })
 
@@ -364,9 +345,7 @@ describe('query handles', () => {
     })
 
     it('should work with infinite queries', () => {
-      const handle = experimental_waterfallHandle(feedQuery, {
-        size: 1,
-      })
+      const handle = {} as experimental_QueryHandle<typeof feedQuery>
 
       const { data } = useSuspenseInfiniteQuery(
         experimental_fromHandle(feedQuery, handle),
@@ -392,9 +371,7 @@ describe('query handles', () => {
     })
 
     it('should take no third argument', () => {
-      const handle = experimental_waterfallHandle(postQuery, {
-        id: '1',
-      })
+      const handle = {} as experimental_QueryHandle<typeof postQuery>
 
       assertType(
         // @ts-expect-error read-site options are spread over the result instead
@@ -409,9 +386,7 @@ describe('query handles', () => {
           queryFn: (): Promise<Post> =>
             Promise.resolve({ id: input.id, title: '' }),
         })
-      const handle = experimental_waterfallHandle(otherQuery, {
-        id: '1',
-      })
+      const handle = {} as experimental_QueryHandle<typeof otherQuery>
 
       // @ts-expect-error the keys differ
       assertType(experimental_fromHandle(postQuery, handle))
@@ -423,39 +398,6 @@ describe('query handles', () => {
       expectTypeOf(
         useQuery(experimental_fromHandle(postQuery, handle)).data,
       ).toEqualTypeOf<Post | undefined>()
-    })
-  })
-
-  describe('experimental_waterfallHandle', () => {
-    it("should take the factory's input", () => {
-      const handle = experimental_waterfallHandle(postQuery, { id: '1' })
-      const viewer = experimental_waterfallHandle(viewerQuery)
-
-      expectTypeOf(handle).toEqualTypeOf<
-        experimental_QueryHandle<typeof postQuery>
-      >()
-      expectTypeOf(viewer.input).toEqualTypeOf<undefined>()
-      // @ts-expect-error the input has the wrong shape
-      experimental_waterfallHandle(postQuery, { id: 1 })
-    })
-
-    it('should switch a handle to a new input', () => {
-      const handle = {} as experimental_QueryHandle<typeof postQuery>
-
-      const next = experimental_waterfallHandle(postQuery, handle, (input) => {
-        expectTypeOf(input).toEqualTypeOf<{ id: string }>()
-        return { ...input, id: '2' }
-      })
-
-      expectTypeOf(next).toEqualTypeOf<
-        experimental_QueryHandle<typeof postQuery>
-      >()
-      experimental_waterfallHandle(
-        postQuery,
-        handle,
-        // @ts-expect-error the new input has the wrong shape
-        () => ({ id: 2 }),
-      )
     })
   })
 
@@ -478,9 +420,7 @@ describe('query handles', () => {
       })
 
     it('should infer a read-site select from the factory with useQuery', () => {
-      const handle = experimental_waterfallHandle(postQuery, {
-        id: '1',
-      })
+      const handle = {} as experimental_QueryHandle<typeof postQuery>
 
       const { data } = useQuery({
         ...experimental_fromHandle(postQuery, handle),
@@ -502,9 +442,7 @@ describe('query handles', () => {
     })
 
     it('should infer a read-site select from the factory with useSuspenseQuery', () => {
-      const handle = experimental_waterfallHandle(postQuery, {
-        id: '1',
-      })
+      const handle = {} as experimental_QueryHandle<typeof postQuery>
 
       const { data } = useSuspenseQuery({
         ...experimental_fromHandle(postQuery, handle),
@@ -518,9 +456,7 @@ describe('query handles', () => {
     })
 
     it('should type read-site placeholderData and enabled from the factory', () => {
-      const handle = experimental_waterfallHandle(postQuery, {
-        id: '1',
-      })
+      const handle = {} as experimental_QueryHandle<typeof postQuery>
 
       assertType(
         useQuery({
@@ -546,9 +482,7 @@ describe('query handles', () => {
     })
 
     it('should infer a read-site select from an infinite factory', () => {
-      const handle = experimental_waterfallHandle(feedQuery, {
-        size: 1,
-      })
+      const handle = {} as experimental_QueryHandle<typeof feedQuery>
 
       const { data } = useInfiniteQuery({
         ...experimental_fromHandle(feedQuery, handle),
@@ -569,27 +503,21 @@ describe('query handles', () => {
     })
 
     it("should type data from a factory's select", async () => {
-      const started = experimental_waterfallHandle(postTitleQuery, {
-        id: '1',
-      })
+      const handle = {} as experimental_QueryHandle<typeof postTitleQuery>
       const awaited = (
         await experimental_loadQueryHandles(queryClient, {
           handle: experimental_fetchEntry(postTitleQuery, { id: '1' }),
         })
       )[0].handle
-      const waterfall = experimental_waterfallHandle(postTitleQuery, {
-        id: '1',
-      })
 
       expectTypeOf(
-        useQuery(experimental_fromHandle(postTitleQuery, started)).data,
+        useQuery(experimental_fromHandle(postTitleQuery, handle)).data,
       ).toEqualTypeOf<string | undefined>()
       expectTypeOf(
         useSuspenseQuery(experimental_fromHandle(postTitleQuery, awaited)).data,
       ).toEqualTypeOf<string>()
       expectTypeOf(
-        useSuspenseQuery(experimental_fromHandle(postTitleQuery, waterfall))
-          .data,
+        useSuspenseQuery(experimental_fromHandle(postTitleQuery, handle)).data,
       ).toEqualTypeOf<string>()
     })
 
@@ -612,9 +540,7 @@ describe('query handles', () => {
     })
 
     it("should type data from an infinite factory's select", () => {
-      const handle = experimental_waterfallHandle(feedItemsQuery, {
-        size: 1,
-      })
+      const handle = {} as experimental_QueryHandle<typeof feedItemsQuery>
 
       expectTypeOf(
         useInfiniteQuery(experimental_fromHandle(feedItemsQuery, handle)).data,
@@ -627,9 +553,7 @@ describe('query handles', () => {
     })
 
     it("should replace a factory's select with a read-site select over the queryFn's data", () => {
-      const handle = experimental_waterfallHandle(postTitleQuery, {
-        id: '1',
-      })
+      const handle = {} as experimental_QueryHandle<typeof postTitleQuery>
 
       const { data } = useSuspenseQuery({
         ...experimental_fromHandle(postTitleQuery, handle),
